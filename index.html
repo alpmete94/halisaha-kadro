@@ -223,6 +223,15 @@ main { padding: 28px clamp(16px, 4vw, 40px) 64px; max-width: 1280px; margin: 0 a
   box-shadow: 0 10px 30px rgb(0 0 0 / .4);
 }
 
+/* ---------- Kaydedilmemiş kadro taslağı ---------- */
+.draft-bar {
+  position: sticky; top: calc(env(safe-area-inset-top, 0px) + 70px); z-index: 4;
+  display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px;
+  padding: 12px 16px; border-radius: 14px; background: #3A2E0B; border: 1px solid var(--flood); color: var(--flood);
+  box-shadow: 0 10px 30px rgb(0 0 0 / .35);
+}
+@media (max-width: 560px) { .draft-bar { top: 8px; } }
+
 /* ---------- Giriş durumu ---------- */
 .who { display: flex; align-items: center; gap: 8px; font-size: .85rem; }
 .tabs a[hidden] { display: none; }
@@ -793,6 +802,48 @@ function save(touch = true) {
 
 // ---------------- Bulut (Supabase) ----------------
 let cloudVersion = 0, cloudSaving = false, cloudDirty = false;
+// Kadro taslağı (bulutta): Maç ekranındaki değişiklikler "Kadroyu kaydet"e basılana kadar sadece bu cihazda.
+let matchDirty = false;
+let matchBase = null; // sunucudaki kayıtlı kadro (JSON), taslağın üstüne başkası kaydetti mi diye bakmak için
+// Alan sırasından bağımsız JSON: veritabanı (jsonb) alanların sırasını değiştirir, karşılaştırma buna takılmasın.
+const canon = v => JSON.stringify(v, (k, x) => (x && typeof x === 'object' && !Array.isArray(x)
+  ? Object.fromEntries(Object.entries(x).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))) : x));
+
+function saveMatch() {
+  if (!useCloud) return save(); // yerel kullanımda taslağa gerek yok
+  if (READONLY) return;
+  matchDirty = true;
+  if ($('result')) drawResult();
+}
+
+async function publishMatch() {
+  let r;
+  try { r = await cloud.load(); } catch { return toast('Kaydedilemedi: internet bağlantını kontrol et.'); }
+  const server = r.state && parseBackup(JSON.stringify(r.state));
+  if (server && matchBase !== null && canon(server.match) !== matchBase
+      && !(await ask('Sen düzenlerken başka biri kadroyu kaydetti. Onunkinin yerine seninki kaydedilsin mi?', 'Benimkini kaydet'))) return;
+  if (server) { server.match = db.match; db = server; } // başkalarının oyuncu/sonuç değişiklikleri korunur
+  cloudVersion = r.version;
+  matchDirty = false;
+  save();
+  clearTimeout(saveTimer);
+  await pushCloud();
+  if (!cloudDirty && !matchDirty) toast('Kadro kaydedildi; herkes artık bunu görüyor.');
+  render();
+}
+
+async function discardMatch() {
+  matchDirty = false;
+  await pull(true);
+  toast('Kayıtlı kadroya dönüldü.');
+}
+
+window.addEventListener('beforeunload', e => { if (matchDirty) { e.preventDefault(); e.returnValue = ''; } });
+
+const draftBar = () => matchDirty ? `<div class="draft-bar" role="status">
+    <span>Kadroda kaydedilmemiş değişiklik var. Diğerleri hâlâ kayıtlı kadroyu görüyor.</span>
+    <span class="row"><button class="btn" id="publish">Kadroyu kaydet</button><button class="btn quiet" id="discard">Vazgeç</button></span>
+  </div>` : '';
 
 function setRole(r, name) {
   role = r;
@@ -809,7 +860,11 @@ async function pull(force = false) {
   if (!force && r.version === cloudVersion) return;
   cloudVersion = r.version;
   const d = r.state && parseBackup(JSON.stringify(r.state));
-  if (d) db = d;
+  if (d) {
+    if (matchDirty) d.match = db.match; // kaydedilmemiş kadro taslağı ezilmesin
+    else matchBase = canon(d.match);
+    db = d;
+  }
   else if (!db) db = { ...fresh(), players: [] }; // sunucu boş: kodlu biri ilk veriyi yükleyene kadar
   if (!r.state && role) await seedCloud();
   render();
@@ -831,6 +886,7 @@ async function pushCloud() {
     cloudDirty = false;
     const state = JSON.parse(JSON.stringify(db));
     delete state.editedAt;
+    if (matchDirty && matchBase) state.match = JSON.parse(matchBase); // taslak kadro başkalarına sızmasın
     let r;
     try { r = await cloud.rpc('save_state', { p_code: storedCode(), p_state: state, p_version: cloudVersion }); }
     catch {
@@ -839,7 +895,12 @@ async function pushCloud() {
       setTimeout(pushCloud, 15000);
       break;
     }
-    if (r.ok) { cloudVersion = r.version; continue; }
+    if (r.ok) {
+      cloudVersion = r.version;
+      // Sunucuya giden halin, pull'da okunacak biçimdeki kadrosu (karşılaştırma aynı biçimde olsun)
+      matchBase = canon(parseBackup(JSON.stringify(state))?.match ?? null);
+      continue;
+    }
     if (r.error === 'conflict') {
       cloudSaving = false;
       toast('Bu arada başka biri kaydetti. Güncel veri yüklendi; son değişikliğini tekrar yap.');
@@ -1173,12 +1234,12 @@ function matchView() {
     $('locks').innerHTML = items.map(([t, k, i]) =>
       `<li><span>${t}</span><button class="btn quiet small" data-k="${k}" data-i="${i}">Kaldır</button></li>`).join('');
     $('locks').querySelectorAll('button').forEach(b => {
-      b.onclick = () => { m.locks[b.dataset.k].splice(+b.dataset.i, 1); save(); drawLocks(); };
+      b.onclick = () => { m.locks[b.dataset.k].splice(+b.dataset.i, 1); saveMatch(); drawLocks(); };
     });
   };
   const syncComing = () => {
     m.coming = [...main.querySelectorAll('.chip input:checked')].map(x => x.value);
-    save();
+    saveMatch();
     count();
   };
 
@@ -1186,13 +1247,13 @@ function matchView() {
   const setAll = on => { main.querySelectorAll('.chip input').forEach(cb => { cb.checked = on; }); syncComing(); };
   $('all').onclick = () => setAll(true);
   $('none').onclick = () => setAll(false);
-  main.querySelectorAll('[name=format]').forEach(r => { r.onchange = () => { m.format = r.value; save(); count(); }; });
+  main.querySelectorAll('[name=format]').forEach(r => { r.onchange = () => { m.format = r.value; saveMatch(); count(); }; });
   $('lock').onsubmit = e => {
     e.preventDefault();
     const fd = new FormData(e.target);
     if (fd.get('x') === fd.get('y')) return toast('Kilit için iki farklı oyuncu seç.');
     m.locks[fd.get('kind')].push([fd.get('x'), fd.get('y')]);
-    save();
+    saveMatch();
     drawLocks();
   };
   $('build').onclick = build;
@@ -1219,8 +1280,12 @@ function pick() {
   m.resultId = null; // yeni kadro: sonucu henüz girilmedi
   selected = null;
   enter = true;
-  save();
+  saveMatch();
   drawResult();
+}
+
+function bindDraft() {
+  if ($('publish')) { $('publish').onclick = publishMatch; $('discard').onclick = discardMatch; }
 }
 
 function drawResult() {
@@ -1228,8 +1293,9 @@ function drawResult() {
   const lineup = db.match.lineup;
   if (!lineup) {
     const msg = READONLY ? 'Bu hafta için kadro henüz kurulmadı.' : note || 'Soldan gelenleri işaretle, sonra Takımları kur.';
-    $r.innerHTML = `<div class="field-wrap"><div class="pitch">${pitchSvg({ a: [], b: [] }, new Map())}</div>
+    $r.innerHTML = `${draftBar()}<div class="field-wrap"><div class="pitch">${pitchSvg({ a: [], b: [] }, new Map())}</div>
       <div><h2>Saha boş</h2><p class="${note ? 'warn' : 'dim'}">${msg}</p></div></div>`;
+    bindDraft();
     return;
   }
   const byId = new Map(db.players.map(p => [p.id, p]));
@@ -1245,7 +1311,7 @@ function drawResult() {
         <span class="tb">Mavi</span>
         <button class="btn">Sonucu kaydet</button>
       </form>`;
-  $r.innerHTML = `${board}
+  $r.innerHTML = `${draftBar()}${board}
     ${resultRow}
     <div class="row">
       ${READONLY || splits.length < 2 ? '' : `<span class="pager" aria-label="Dengeli öneriler">
@@ -1263,6 +1329,7 @@ function drawResult() {
       </div>
     </div>`;
   enter = false;
+  bindDraft();
   $('png').onclick = () => {
     const date = new Date(db.savedAt || Date.now()).toLocaleDateString('tr-TR', { day: 'numeric', month: 'long' });
     sharePng(pitchSvg(lineup, byId, null, { a: fmt(A.overall), b: fmt(B.overall), diff, date }),
@@ -1273,7 +1340,7 @@ function drawResult() {
     const id = e.target.closest('.pl')?.dataset.id;
     if (!id) return;
     if (!selected) selected = id;
-    else { if (selected !== id) db.match.lineup = swap(db.match.lineup, selected, id); selected = null; save(); }
+    else { if (selected !== id) db.match.lineup = swap(db.match.lineup, selected, id); selected = null; saveMatch(); }
     drawResult();
   };
   if ($('next')) {
@@ -1292,6 +1359,7 @@ function drawResult() {
     db.players = players;
     history().push(entry);
     db.match.resultId = entry.id;
+    matchDirty = false; // sonuçla birlikte kadro da kaydedilir
     save();
     toast(sa === sb ? 'Beraberlik kaydedildi.' : `${sa > sb ? 'Kırmızı' : 'Mavi'} kazandı, sonuç kaydedildi.`);
     drawResult();
