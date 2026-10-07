@@ -221,6 +221,10 @@ main { padding: 28px clamp(16px, 4vw, 40px) 64px; max-width: 1280px; margin: 0 a
   box-shadow: 0 10px 30px rgb(0 0 0 / .4);
 }
 
+/* ---------- Giriş durumu ---------- */
+.who { display: flex; align-items: center; gap: 8px; font-size: .85rem; }
+.tabs a[hidden] { display: none; }
+
 /* ---------- Onay penceresi ---------- */
 .ask { position: fixed; inset: 0; z-index: 20; display: grid; place-items: center; padding: 16px; background: rgb(3 12 8 / .7); }
 .ask-box { width: min(420px, 100%); display: grid; gap: 18px; padding: 22px; border-radius: 16px; background: var(--turf-1); border: 1px solid var(--turf-3); box-shadow: 0 20px 60px rgb(0 0 0 / .5); }
@@ -302,7 +306,9 @@ if (typeof module !== 'undefined') module.exports = { APP_CSS };
       <a href="#mac" data-tab="mac">Maç</a>
     <a href="#puan" data-tab="puan">Puan durumu</a>
       <a href="#yedek" data-tab="yedek">Yedek</a>
+      <a href="#yetki" data-tab="yetki" hidden>Yetkiler</a>
     </nav>
+    <div class="who" id="who" hidden></div>
   </header>
   <main id="main"></main>
   <p id="toast" role="status" hidden></p>
@@ -679,8 +685,36 @@ function staticPage(d, css) {
 
 if (typeof module !== 'undefined') module.exports = { card, pitchSvg, scoreboard, roster, standingsTable, historyList, staticSections, staticPage };
 </script>
+  <script>/* cloud.js */
+// Supabase ortak veri bağlantısı. URL ve anahtar boşsa uygulama bu cihazda (localStorage) çalışır.
+// Anahtar herkese açık "publishable / anon" anahtardır: herkes okur, yazmayı sunucudaki fonksiyonlar
+// 5 haneli kodla denetler (bulut.sql). service_role / secret anahtarı ASLA buraya konmaz.
+const CLOUD_URL = 'https://wcnlqjvqyuskvcrqxwyt.supabase.co';
+const CLOUD_KEY = 'sb_publishable_PD8ZZx820vAwoC604-TX5g_zpQsfBoS';
+
+const cloudOn = () => Boolean(CLOUD_URL && CLOUD_KEY);
+
+async function cloudFetch(path, body) {
+  const headers = { apikey: CLOUD_KEY, 'Content-Type': 'application/json' };
+  if (CLOUD_KEY.startsWith('eyJ')) headers.Authorization = `Bearer ${CLOUD_KEY}`; // eski tip (JWT) anon anahtar
+  const res = await fetch(`${CLOUD_URL}/rest/v1/${path}`,
+    body === undefined ? { headers, cache: 'no-store' } : { method: 'POST', headers, body: JSON.stringify(body) });
+  if (!res.ok) throw new Error(`Sunucu hatası (${res.status})`);
+  return res.json();
+}
+
+const cloud = {
+  // { state, version } — state henüz hiç kaydedilmediyse null
+  async load() {
+    const rows = await cloudFetch('app_state?id=eq.1&select=state,version');
+    return rows[0] ?? { state: null, version: 0 };
+  },
+  // Sunucu fonksiyonları { ok, ... } ya da { ok: false, error } döner.
+  rpc: (fn, args) => cloudFetch(`rpc/${fn}`, args),
+};
+</script>
   <script>/* app.js */
-// Kişisel kadro kurucu. Veriler bu tarayıcıda (localStorage) saklanır; "Yedek" sekmesinden dosyaya alınır.
+// Halı saha kadro kurucu: oyuncu kartları, dengeli takım, saha, puan durumu. Depolama aşağıda (bulut / claude.ai / yerel).
 const KEY = 'halisaha-kadro';
 const POS = { GK: 'Kaleci', DEF: 'Defans', MID: 'Orta saha', FWD: 'Forvet' };
 const LABEL = { shot: 'Şut', pass: 'Pas', dribble: 'Top sürme', pace: 'Hız', defense: 'Savunma', physical: 'Fizik', goalkeeping: 'Kalecilik' };
@@ -706,22 +740,30 @@ const fresh = () => ({
 });
 const history = () => (db.history ??= []); // eski verilerde geçmiş yok
 
-// Depolama: claude.ai'de yayınlanmışsa ortak veritabanı (telefon ve bilgisayar aynı veriyi görür),
-// yerel dosya olarak açılmışsa bu tarayıcının localStorage'ı.
+// Depolama, üç yoldan biri:
+//  - bulut (cloud.js doluysa): Supabase'te ortak veri; telefon ve bilgisayar aynı veriyi görür.
+//    Kodu olmayan izleyicidir (sadece görür); kodla giren yönetici/düzenleyici değiştirir.
+//  - claude.ai yayını: platformun ortak veritabanı.
+//  - yerel: bu tarayıcının localStorage'ı.
 const inArtifact = typeof window.claude?.use === 'function';
-// Arkadaşlar için yayınlanan site (site.html): veriyi data.json'dan okur, hiçbir şey değiştirmez.
-const READONLY = window.KADRO_READONLY === true;
+const useCloud = cloudOn() && !inArtifact;
+const CODE_KEY = 'halisaha-kod';
+let READONLY = false;       // izleyici: her şeyi görür, hiçbir şeyi değiştiremez
+let role = null;            // bulutta giriş yapanın rolü: 'admin' | 'editor' | null
+let me = '';                // giriş yapanın adı
 // Tek dosyalık uygulamanın açılış anındaki hali (henüz çizilmemiş). "HTML'i indir" bunu kopyalayıp içine güncel veriyi gömer.
 const PRISTINE = document.documentElement.outerHTML;
 const SINGLE_FILE = !document.querySelector('script[src]');
 let remote = null;          // claude.ai db belgesi
-let db = null;              // { players, match }
-let needsSetup = false;     // ortak veritabanı boş: ilk kurulum ekranı
+let db = null;              // { players, match, history, scale }
+let needsSetup = false;     // claude.ai veritabanı boş: ilk kurulum ekranı
 
 function loadLocal() {
   try { const d = JSON.parse(localStorage.getItem(KEY)); if (d) return d; } catch {}
   return null;
 }
+const storedCode = () => { try { return localStorage.getItem(CODE_KEY) || ''; } catch { return ''; } };
+function rememberCode(c) { try { c ? localStorage.setItem(CODE_KEY, c) : localStorage.removeItem(CODE_KEY); } catch {} }
 
 let writing = false, dirty = false, saveTimer = null;
 async function flush() {
@@ -734,26 +776,142 @@ async function flush() {
   } while (dirty);
   writing = false;
 }
+
 // touch: gerçek bir değişiklik (açılıştaki dönüştürme kaydı değil). Paylaşılan dosyadaki verinin
 // yerel düzenlemeleri ezip ezmeyeceği editedAt ile karşılaştırılarak karar verilir.
 function save(touch = true) {
   if (READONLY) return;
   if (touch) db.editedAt = new Date().toISOString();
+  if (useCloud) { cloudDirty = true; clearTimeout(saveTimer); saveTimer = setTimeout(pushCloud, 400); return; }
   if (remote) { clearTimeout(saveTimer); saveTimer = setTimeout(flush, 300); return; }
   try { localStorage.setItem(KEY, JSON.stringify(db)); }
   catch { toast('Kaydedilemedi: tarayıcı depolaması kapalı. Yedek sekmesinden dosyaya al.'); }
 }
 
-async function boot() {
-  if (READONLY) {
-    main.innerHTML = '<p class="dim">Yükleniyor…</p>';
-    try {
-      const res = await fetch('data.json', { cache: 'no-store' });
-      db = res.ok ? parseBackup(await res.text()) : null;
-    } catch { db = null; }
-    if (!db) { main.innerHTML = '<div class="empty">Kadro henüz paylaşılmamış.</div>'; return; }
-    return render();
+// ---------------- Bulut (Supabase) ----------------
+let cloudVersion = 0, cloudSaving = false, cloudDirty = false;
+
+function setRole(r, name) {
+  role = r;
+  me = name || '';
+  READONLY = useCloud && !r;
+  drawWho();
+}
+
+// Sunucudaki veriyi getirir. Kullanıcı düzenlerken ya da kaydedilmemiş değişiklik varken ezmez.
+async function pull(force = false) {
+  if (!force && (editing || cloudSaving || cloudDirty)) return;
+  let r;
+  try { r = await cloud.load(); } catch { if (force) toast('Sunucuya ulaşılamadı. İnternet bağlantını kontrol et.'); return; }
+  if (!force && r.version === cloudVersion) return;
+  cloudVersion = r.version;
+  const d = r.state && parseBackup(JSON.stringify(r.state));
+  if (d) db = d;
+  else if (!db) db = { ...fresh(), players: [] }; // sunucu boş: kodlu biri ilk veriyi yükleyene kadar
+  if (!r.state && role) await seedCloud();
+  render();
+}
+
+// Sunucu boşken ilk giren yönetici/düzenleyici, bu cihazdaki veriyle başlatır.
+async function seedCloud() {
+  const local = loadLocal();
+  db = local ? toScale100(local) : fresh();
+  save(false);
+  await pushCloud();
+  toast('Bu cihazdaki oyuncular ortak alana yüklendi.');
+}
+
+async function pushCloud() {
+  if (cloudSaving || !role) return;
+  cloudSaving = true;
+  while (cloudDirty) {
+    cloudDirty = false;
+    const state = JSON.parse(JSON.stringify(db));
+    delete state.editedAt;
+    let r;
+    try { r = await cloud.rpc('save_state', { p_code: storedCode(), p_state: state, p_version: cloudVersion }); }
+    catch {
+      cloudDirty = true;
+      toast('Kaydedilemedi: internet yok. Bağlantı gelince tekrar denenecek.');
+      setTimeout(pushCloud, 15000);
+      break;
+    }
+    if (r.ok) { cloudVersion = r.version; continue; }
+    if (r.error === 'conflict') {
+      cloudSaving = false;
+      toast('Bu arada başka biri kaydetti. Güncel veri yüklendi; son değişikliğini tekrar yap.');
+      return pull(true);
+    }
+    if (r.error === 'wrong' || r.error === 'locked') {
+      rememberCode('');
+      setRole(null);
+      toast('Kodun artık geçerli değil; izleyici olarak devam ediyorsun.');
+      render();
+      break;
+    }
+    toast('Kaydedilemedi.');
+    break;
   }
+  cloudSaving = false;
+}
+
+async function bootCloud() {
+  main.innerHTML = '<p class="dim">Yükleniyor…</p>';
+  const code = storedCode();
+  if (code) {
+    const w = await cloud.rpc('whoami', { p_code: code }).catch(() => null);
+    if (w?.ok) setRole(w.role, w.name);
+    else { if (w?.error === 'wrong') rememberCode(''); setRole(null); }
+  } else setRole(null);
+  await pull(true);
+  setInterval(pull, 20000);
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) pull(); });
+}
+
+// Üst banttaki giriş durumu ve role göre sekmeler.
+function drawWho() {
+  const el = $('who');
+  const tab = t => document.querySelector(`.tabs [data-tab=${t}]`);
+  if (tab('yedek')) tab('yedek').hidden = READONLY;
+  if (tab('yetki')) tab('yetki').hidden = role !== 'admin';
+  if (!el) return;
+  el.hidden = !useCloud;
+  if (!useCloud) return;
+  el.innerHTML = role
+    ? `<span class="dim">${esc(me)}, ${role === 'admin' ? 'yönetici' : 'düzenleyici'}</span> <button class="btn quiet small" id="logout">Çıkış</button>`
+    : '<button class="btn quiet small" id="login">Giriş</button>';
+  if (role) $('logout').onclick = () => { rememberCode(''); setRole(null); toast('Çıkış yapıldı; izleyici olarak devam ediyorsun.'); render(); };
+  else $('login').onclick = loginDialog;
+}
+
+function loginDialog() {
+  const el = document.createElement('div');
+  el.className = 'ask';
+  el.innerHTML = `<form class="ask-box" aria-label="Giriş">
+      <p>Yönetici ya da düzenleyici kodunu yaz. Kodun yoksa giriş yapmadan her şeyi görebilirsin.</p>
+      <input class="input" id="code" inputmode="numeric" pattern="[0-9]{5}" maxlength="5" required autocomplete="off" placeholder="5 haneli kod">
+      <div class="row"><button class="btn">Giriş yap</button><button type="button" class="btn quiet" data-no>Vazgeç</button></div>
+    </form>`;
+  document.body.append(el);
+  el.querySelector('#code').focus();
+  el.querySelector('[data-no]').onclick = () => el.remove();
+  el.onkeydown = e => { if (e.key === 'Escape') el.remove(); };
+  el.querySelector('form').onsubmit = async e => {
+    e.preventDefault();
+    const c = el.querySelector('#code').value.trim();
+    let w;
+    try { w = await cloud.rpc('whoami', { p_code: c }); } catch { return toast('Sunucuya ulaşılamadı.'); }
+    if (!w.ok) return toast(w.error === 'locked' ? 'Çok fazla yanlış deneme. Bir saat sonra tekrar dene.' : 'Kod yanlış.');
+    rememberCode(c);
+    el.remove();
+    setRole(w.role, w.name);
+    toast(`Hoş geldin ${w.name}.`);
+    await pull(true);
+  };
+}
+
+async function boot() {
+  if (useCloud) return bootCloud();
   if (!inArtifact) {
     const d = loadLocal();
     db = d ? toScale100(d) : fresh(); // eski 10'luk veri bir kez çevrilir
@@ -1226,8 +1384,49 @@ function setupView() {
   $('sample').onclick = () => { db = fresh(); needsSetup = false; save(); render(); };
 }
 
+// ---------------- Yetkiler (sadece yönetici) ----------------
+async function membersView() {
+  if (role !== 'admin') { location.hash = 'oyuncular'; return; }
+  main.innerHTML = '<p class="dim">Yükleniyor…</p>';
+  const r = await cloud.rpc('members_list', { p_code: storedCode() }).catch(() => null);
+  if (!r?.ok) { main.innerHTML = '<div class="empty">Yetki listesi alınamadı. İnternet bağlantını kontrol edip sayfayı yenile.</div>'; return; }
+  main.innerHTML = `<div class="head"><div><h1>Yetkiler</h1>
+      <p>Linki bilen herkes görüntüler. Kodu olan düzenleyiciler her şeyi değiştirebilir; kod vermek sadece yöneticide.</p></div></div>
+    <div class="panel"><h2>Kod ver</h2>
+      <form id="add-member" class="row">
+        <input class="input" name="name" required maxlength="20" placeholder="Arkadaşının adı" aria-label="Ad">
+        <select class="input" name="role" aria-label="Rol"><option value="editor">Düzenleyici</option><option value="admin">Yönetici</option></select>
+        <button class="btn">Kod üret</button>
+      </form></div>
+    <div class="table-wrap"><table class="standings">
+      <thead><tr><th class="l">Ad</th><th class="l">Rol</th><th>Kod</th><th></th></tr></thead>
+      <tbody>${r.members.map(m => `<tr>
+        <td class="l">${esc(m.name)}</td><td class="l">${m.role === 'admin' ? 'Yönetici' : 'Düzenleyici'}</td>
+        <td class="pts">${esc(m.code)}</td>
+        <td>${m.me ? '<span class="dim">sen</span>' : `<button class="btn quiet small" data-rm="${esc(m.id)}" data-name="${esc(m.name)}">Kodu iptal et</button>`}</td>
+      </tr>`).join('')}</tbody>
+    </table></div>`;
+  $('add-member').onsubmit = async e => {
+    e.preventDefault();
+    const f = e.target;
+    const res = await cloud.rpc('member_add', { p_code: storedCode(), p_name: f.name.value.trim(), p_role: f.role.value }).catch(() => null);
+    if (!res?.ok) return toast('Kod üretilemedi.');
+    toast(`${f.name.value.trim()} için kod: ${res.code}`);
+    membersView();
+  };
+  main.querySelectorAll('[data-rm]').forEach(b => {
+    b.onclick = async () => {
+      if (!(await ask(`${b.dataset.name} adlı kişinin kodu iptal edilsin mi? Bir daha değişiklik yapamaz, sadece görüntüler.`, 'Kodu iptal et', true))) return;
+      const res = await cloud.rpc('member_remove', { p_code: storedCode(), p_id: b.dataset.rm }).catch(() => null);
+      if (!res?.ok) return toast('İptal edilemedi.');
+      toast('Kod iptal edildi.');
+      membersView();
+    };
+  });
+}
+
 // ---------------- Sekmeler ----------------
-const views = { oyuncular: playersView, mac: matchView, puan: standingsView, yedek: backupView };
+const views = { oyuncular: playersView, mac: matchView, puan: standingsView, yedek: backupView, yetki: membersView };
 function render() {
   editing = false;
   const tab = views[location.hash.slice(1)] ? location.hash.slice(1) : READONLY ? 'mac' : 'oyuncular';
