@@ -1,0 +1,1245 @@
+<!doctype html>
+<!-- OTOMATİK ÜRETİLDİ. Düzenleme: index.src.html ve .js dosyaları, sonra: node build.js -->
+<html lang="tr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Halı Saha Kadro</title>
+  <meta name="robots" content="noindex">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@600;800;900&family=Rubik:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <script>/* style.js */
+// Uygulamanın tüm stilleri. Tek kaynak: sayfaya <style> olarak eklenir, paylaşılan HTML'e de gömülür
+// (dosyadan açılan sayfada tarayıcı .css içeriğini okutmadığı için stil burada tutuluyor).
+const APP_CSS = String.raw`:root {
+  --turf-0: #0B2318;   /* gece çimi: sayfa */
+  --turf-1: #12331F;   /* panel */
+  --turf-2: #1B4A2E;   /* yükseltilmiş */
+  --turf-3: #2A6340;   /* kenar */
+  --chalk: #EEF3E8;    /* çizgi beyazı: metin */
+  --chalk-dim: #9DB8A6;
+  --flood: #FFE7A3;    /* projektör: vurgu */
+  --red: #EF4B3F;
+  --blue: #3D7BFF;
+  --display: "Big Shoulders Display", "Arial Narrow", "Roboto Condensed", sans-serif;
+  --text: "Rubik", "Segoe UI", system-ui, sans-serif;
+}
+* { box-sizing: border-box; }
+:root { color-scheme: dark; } /* tek, bilinçli koyu tasarım */
+body {
+  margin: 0; min-height: 100vh;
+  font: 15px/1.5 var(--text); color: var(--chalk);
+  background:
+    radial-gradient(1200px 500px at 50% -180px, rgb(255 231 163 / .10), transparent 70%),
+    var(--turf-0);
+}
+:focus-visible { outline: 2px solid var(--flood); outline-offset: 2px; }
+button, input, select { font: inherit; color: inherit; }
+h1, h2 { font-family: var(--display); font-weight: 800; letter-spacing: .01em; margin: 0; line-height: 1.05; }
+h1 { font-size: 2.6rem; }
+h2 { font-size: 1.35rem; }
+.dim { color: var(--chalk-dim); }
+
+/* ---------- Üst bant ---------- */
+.top {
+  position: sticky; top: env(safe-area-inset-top, 0px); z-index: 5;
+  display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap;
+  /* İçerikle aynı hizada: main 1280px ortalı + iç boşluk */
+  padding: 12px max(clamp(16px, 4vw, 40px), calc((100% - 1280px) / 2 + 40px));
+  background: rgb(11 35 24 / .88); backdrop-filter: blur(8px);
+  border-bottom: 1px solid var(--turf-2);
+}
+.brand { font-family: var(--display); font-weight: 900; font-size: 1.6rem; color: var(--chalk); text-decoration: none; letter-spacing: .02em; }
+.tabs { display: flex; gap: 4px; background: var(--turf-1); padding: 4px; border-radius: 999px; border: 1px solid var(--turf-2); }
+.tabs a { padding: 6px 16px; border-radius: 999px; color: var(--chalk-dim); text-decoration: none; font-weight: 500; white-space: nowrap; }
+.tabs a.active { background: var(--flood); color: var(--turf-0); font-weight: 600; }
+main { padding: 28px clamp(16px, 4vw, 40px) 64px; max-width: 1280px; margin: 0 auto; }
+.head { display: flex; align-items: end; justify-content: space-between; gap: 16px; flex-wrap: wrap; margin-bottom: 24px; }
+.head p { margin: 6px 0 0; color: var(--chalk-dim); }
+
+/* ---------- Düğmeler ---------- */
+.btn { border: 0; border-radius: 10px; padding: 10px 18px; font-weight: 600; cursor: pointer; background: var(--flood); color: var(--turf-0); }
+.btn:hover { filter: brightness(1.06); }
+.btn.big { font-size: 1.05rem; padding: 14px 20px; width: 100%; }
+.btn.quiet { background: transparent; color: var(--chalk); border: 1px solid var(--turf-3); }
+.btn.quiet:hover { background: var(--turf-2); }
+.btn.danger { background: transparent; color: #FF8A80; border: 1px solid #7A2E28; }
+.btn.small { padding: 5px 12px; font-size: .85rem; border-radius: 8px; }
+.btn:disabled { opacity: .4; cursor: default; filter: none; }
+.row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+
+/* ---------- FUT kartı ---------- */
+.cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(176px, 1fr)); gap: 22px 18px; }
+.fut {
+  --ink: #2B210B;
+  position: relative; display: grid; grid-template-columns: auto 1fr; grid-template-rows: auto auto auto;
+  aspect-ratio: 5 / 7; padding: 16px 16px 26px; border: 0; text-align: left; cursor: pointer; color: var(--ink);
+  clip-path: polygon(0 7%, 10% 0, 90% 0, 100% 7%, 100% 86%, 50% 100%, 0 86%);
+  background:
+    radial-gradient(120% 60% at 80% 10%, rgb(255 255 255 / .45), transparent 60%),
+    linear-gradient(165deg, var(--c1), var(--c2) 55%, var(--c3));
+  filter: drop-shadow(0 10px 18px rgb(0 0 0 / .35));
+}
+.fut:hover { transform: translateY(-3px); }
+.fut:focus-visible { outline: none; filter: drop-shadow(0 0 0 var(--flood)) drop-shadow(0 0 6px var(--flood)); }
+.fut.gold { --c1: #FBEAB0; --c2: #DDAE45; --c3: #A97A18; }
+.fut.silver { --c1: #F3F5F7; --c2: #C2C9D0; --c3: #8D97A1; --ink: #1E252C; }
+.fut.bronze { --c1: #F4D0AE; --c2: #C9824A; --c3: #8E5126; --ink: #2E1606; }
+.fut-left { display: grid; justify-items: center; align-content: start; gap: 2px; padding-top: 4px; }
+.fut-rating { font-family: var(--display); font-weight: 900; font-size: 2.7rem; line-height: .9; }
+.fut-pos { font-family: var(--display); font-weight: 800; font-size: 1rem; line-height: 1.1; }
+.fut-mono {
+  justify-self: end; align-self: start; width: 74%; aspect-ratio: 1; display: grid; place-items: center;
+  font-family: var(--display); font-weight: 900; font-size: 3.4rem; color: rgb(0 0 0 / .16);
+  border-radius: 50%; background: radial-gradient(circle at 50% 40%, rgb(255 255 255 / .35), transparent 70%);
+}
+.fut-name {
+  grid-column: 1 / -1; text-align: center; margin: 8px 0 6px; padding-bottom: 6px;
+  font-family: var(--display); font-weight: 900; font-size: 1.45rem; line-height: 1;
+  border-bottom: 1px solid rgb(0 0 0 / .2); overflow-wrap: anywhere;
+}
+/* FUT düzeni: solda HIZ/ŞUT/PAS, sağda TOP/SAV/FİZ */
+.fut-stats { grid-column: 1 / -1; display: grid; grid-template-columns: 1fr 1fr; grid-template-rows: repeat(3, auto); grid-auto-flow: column; gap: 1px 14px; margin: 0; padding: 0 4px; }
+.fut-gk { grid-column: 1 / -1; justify-self: center; margin-top: 4px; font-size: .72rem; font-weight: 600; opacity: .8; }
+.fut-gk b { font-family: var(--display); font-weight: 900; font-size: 1rem; }
+.fut-stats div { display: flex; gap: 6px; align-items: baseline; }
+.fut-stats dd { margin: 0; font-family: var(--display); font-weight: 900; font-size: 1.15rem; min-width: 1.2em; text-align: right; }
+.fut-stats dt { font-size: .72rem; font-weight: 600; opacity: .8; }
+
+.empty { padding: 48px; text-align: center; border: 1px dashed var(--turf-3); border-radius: 16px; color: var(--chalk-dim); }
+
+/* ---------- Oyuncu düzenleme ---------- */
+.editor { display: grid; grid-template-columns: 240px minmax(0, 460px); gap: 40px; align-items: start; }
+@media (max-width: 720px) { .editor { grid-template-columns: 1fr; } .editor .preview { max-width: 220px; } }
+.preview { position: sticky; top: 96px; }
+.preview .fut { cursor: default; width: 100%; }
+.preview .fut:hover { transform: none; }
+.form { display: grid; gap: 22px; }
+.field { display: grid; gap: 6px; }
+.field > span { font-weight: 500; }
+.input { background: var(--turf-1); border: 1px solid var(--turf-3); border-radius: 10px; padding: 10px 12px; }
+.pills { display: flex; flex-wrap: wrap; gap: 8px; }
+.pill { position: relative; }
+.pill input { position: absolute; opacity: 0; inset: 0; cursor: pointer; }
+.pill span { display: block; padding: 7px 14px; border-radius: 999px; border: 1px solid var(--turf-3); color: var(--chalk-dim); }
+.pill input:checked + span { background: var(--flood); border-color: var(--flood); color: var(--turf-0); font-weight: 600; }
+.pill input:focus-visible + span { outline: 2px solid var(--flood); outline-offset: 2px; }
+.sliders { display: grid; gap: 10px; }
+.slider { display: grid; grid-template-columns: 96px 1fr 42px; align-items: center; gap: 12px; }
+.slider input { accent-color: var(--flood); width: 100%; }
+.slider output { font-family: var(--display); font-weight: 900; font-size: 1.4rem; text-align: right; }
+.group-label { font-size: .85rem; color: var(--chalk-dim); margin-top: 6px; }
+
+/* ---------- Maç ---------- */
+.match { display: grid; grid-template-columns: 340px minmax(0, 1fr); gap: 28px; align-items: start; }
+@media (max-width: 960px) { .match { grid-template-columns: 1fr; } }
+.setup { display: grid; gap: 26px; background: var(--turf-1); border: 1px solid var(--turf-2); border-radius: 18px; padding: 22px; }
+.setup section { display: grid; gap: 10px; }
+.setup h2 { display: flex; justify-content: space-between; align-items: baseline; }
+.setup h2 small { font-family: var(--text); font-weight: 400; font-size: .85rem; color: var(--chalk-dim); }
+.segmented { display: grid; grid-template-columns: repeat(3, 1fr); background: var(--turf-0); border-radius: 10px; padding: 4px; gap: 4px; }
+.segmented label { position: relative; }
+.segmented input { position: absolute; opacity: 0; inset: 0; cursor: pointer; }
+.segmented span { display: block; text-align: center; padding: 6px; border-radius: 7px; font-family: var(--display); font-weight: 800; font-size: 1.15rem; color: var(--chalk-dim); }
+.segmented input:checked + span { background: var(--turf-2); color: var(--chalk); }
+.segmented input:focus-visible + span { outline: 2px solid var(--flood); }
+.roster-pick { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.chip { position: relative; }
+.chip input { position: absolute; opacity: 0; inset: 0; cursor: pointer; }
+.chip span { display: flex; justify-content: space-between; gap: 6px; padding: 7px 10px; border-radius: 9px; border: 1px solid var(--turf-2); color: var(--chalk-dim); }
+.chip b { font-family: var(--display); font-weight: 800; font-size: 1.05rem; color: inherit; }
+.chip input:checked + span { background: var(--turf-2); border-color: var(--turf-3); color: var(--chalk); }
+.chip input:checked + span::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--flood); align-self: center; box-shadow: 0 0 8px var(--flood); }
+.chip span::before { content: ""; width: 7px; height: 7px; border-radius: 50%; border: 1px solid var(--turf-3); align-self: center; }
+.chip span em { font-style: normal; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chip input:focus-visible + span { outline: 2px solid var(--flood); }
+.count { font-size: .9rem; color: var(--chalk-dim); }
+.count.off { color: #FFC37A; }
+.lock-form { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.lock-form select { background: var(--turf-0); border: 1px solid var(--turf-2); border-radius: 8px; padding: 7px; min-width: 0; }
+.lock-form .kind { grid-column: 1 / -1; }
+.lock-form .btn { grid-column: 1 / -1; }
+.locks { list-style: none; padding: 0; margin: 0; display: grid; gap: 6px; }
+.locks li { display: flex; justify-content: space-between; align-items: center; gap: 8px; font-size: .9rem; padding: 6px 10px; background: var(--turf-0); border-radius: 8px; }
+
+/* Sahne: skor tabelası + saha */
+.stage { display: grid; gap: 18px; }
+.scoreboard {
+  display: grid; grid-template-columns: 1fr auto 1fr; align-items: center;
+  background: linear-gradient(#0A1A12, #06120C); border: 1px solid var(--turf-2); border-radius: 16px; overflow: hidden;
+}
+.sb-team { display: flex; align-items: center; gap: 14px; padding: 14px 22px; }
+.sb-team.red { border-left: 6px solid var(--red); }
+.sb-team.blue { border-right: 6px solid var(--blue); justify-content: flex-end; }
+.sb-name { font-family: var(--display); font-weight: 800; font-size: 1.4rem; }
+.sb-team small { display: block; font-size: .8rem; color: var(--chalk-dim); }
+.sb-score { font-family: var(--display); font-weight: 900; font-size: 3.4rem; line-height: 1; font-variant-numeric: tabular-nums; color: var(--flood); text-shadow: 0 0 18px rgb(255 231 163 / .35); }
+.sb-mid { text-align: center; padding: 0 10px; }
+.sb-mid b { display: block; font-family: var(--display); font-weight: 900; font-size: 1.6rem; }
+.sb-mid span { font-size: .8rem; color: var(--chalk-dim); }
+.bars { display: grid; grid-template-columns: 1fr 1fr; gap: 10px 24px; padding: 0 4px; }
+@media (max-width: 560px) { .bars { grid-template-columns: 1fr; } }
+.bar { display: grid; grid-template-columns: 34px 1fr 34px; align-items: center; gap: 4px 10px; font-family: var(--display); font-weight: 800; font-size: 1.05rem; }
+.bar .label { grid-column: 1 / -1; font-family: var(--text); font-weight: 400; color: var(--chalk-dim); font-size: .8rem; text-align: center; }
+.bar > span:last-child { text-align: right; }
+.bar .track { display: flex; gap: 2px; height: 8px; }
+.bar .track i:first-child { background: var(--red); border-radius: 4px 0 0 4px; }
+.bar .track i:last-child { background: var(--blue); border-radius: 0 4px 4px 0; }
+.field-wrap { display: grid; grid-template-columns: minmax(0, 420px) minmax(0, 1fr); gap: 22px; align-items: start; }
+@media (max-width: 760px) { .field-wrap { grid-template-columns: 1fr; } }
+.pitch svg { width: 100%; height: auto; display: block; border-radius: 14px; box-shadow: 0 20px 50px rgb(0 0 0 / .45); }
+.pitch .pl { cursor: pointer; }
+.pitch.enter .pl > g { animation: drop .45s cubic-bezier(.2, .9, .3, 1.3) backwards; animation-delay: calc(var(--i) * 45ms); transform-box: fill-box; transform-origin: center; }
+@keyframes drop { from { opacity: 0; transform: translateY(-14px) scale(.6); } }
+@media (prefers-reduced-motion: reduce) { .pitch.enter .pl > g { animation: none; } .fut:hover { transform: none; } }
+.hint { font-size: .85rem; color: var(--chalk-dim); margin: 0; }
+.teams { display: grid; gap: 18px; }
+.team h2 { display: flex; justify-content: space-between; align-items: baseline; padding-bottom: 6px; margin-bottom: 6px; border-bottom: 2px solid; }
+.team.red h2 { border-color: var(--red); }
+.team.blue h2 { border-color: var(--blue); }
+.team ul { list-style: none; padding: 0; margin: 0; display: grid; gap: 2px; }
+.team li button {
+  width: 100%; display: grid; grid-template-columns: 38px 1fr auto; align-items: center; gap: 8px;
+  padding: 6px 8px; border: 1px solid transparent; border-radius: 8px; background: none; cursor: pointer; text-align: left;
+}
+.team li button:hover { background: var(--turf-1); }
+.team li button.sel { border-color: var(--flood); background: rgb(255 231 163 / .08); }
+.team .tag { font-family: var(--display); font-weight: 800; font-size: .95rem; color: var(--chalk-dim); }
+.team .rt { font-family: var(--display); font-weight: 800; font-size: 1.1rem; }
+.team li.sub { opacity: .65; }
+.warn { color: #FFC37A; }
+
+/* ---------- Yedek ---------- */
+.panel { background: var(--turf-1); border: 1px solid var(--turf-2); border-radius: 18px; padding: 24px; display: grid; gap: 14px; max-width: 640px; margin-bottom: 18px; }
+.panel p { margin: 0; color: var(--chalk-dim); }
+.file input { font-size: .9rem; color: var(--chalk-dim); }
+
+#toast {
+  position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%); margin: 0; z-index: 10;
+  padding: 12px 20px; border-radius: 12px; background: var(--flood); color: var(--turf-0); font-weight: 600;
+  box-shadow: 0 10px 30px rgb(0 0 0 / .4);
+}
+
+/* ---------- Onay penceresi ---------- */
+.ask { position: fixed; inset: 0; z-index: 20; display: grid; place-items: center; padding: 16px; background: rgb(3 12 8 / .7); }
+.ask-box { width: min(420px, 100%); display: grid; gap: 18px; padding: 22px; border-radius: 16px; background: var(--turf-1); border: 1px solid var(--turf-3); box-shadow: 0 20px 60px rgb(0 0 0 / .5); }
+.ask-box p { margin: 0; font-size: 1.05rem; }
+
+/* ---------- Telefon ---------- */
+@media (max-width: 560px) {
+  h1 { font-size: 2.1rem; }
+  .top { position: static; } /* dar ekranda iki satırlık başlık içeriği kapatmasın */
+  .brand { font-size: 1.35rem; }
+  .tabs a { padding: 6px 10px; font-size: .9rem; }
+  .sb-team { flex-direction: column; align-items: flex-start; gap: 2px; padding: 10px 12px; }
+  .sb-team.blue { align-items: flex-end; flex-direction: column-reverse; }
+  .sb-score { font-size: 2.4rem; }
+  .sb-name { font-size: 1.15rem; }
+  .cards { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px 12px; }
+  .fut { padding: 12px 10px 22px; }
+  .fut-rating { font-size: 2.1rem; }
+  .fut-name { font-size: 1.15rem; }
+  .fut-mono { font-size: 2.6rem; }
+  .slider { grid-template-columns: 84px 1fr 38px; }
+}
+
+/* Arkadaşlara açık site: kartlar salt okunur */
+.fut:disabled { cursor: default; }
+.fut:disabled:hover { transform: none; }
+
+/* ---------- JavaScript'siz paylaşılan görünüm ---------- */
+.static > section { scroll-margin-top: 90px; }
+.static > section + section { margin-top: 56px; }
+.static .team li button, .static .fut { cursor: default; }
+
+/* ---------- Maç sonucu ve puan durumu ---------- */
+.form-tag { font-family: var(--display); font-weight: 800; font-size: .95rem; line-height: 1.1; }
+.form-tag.up { color: #4ADE80; }
+.form-tag.down { color: #FF8A80; }
+.fut .form-tag.up { color: #14532D; }
+.fut .form-tag.down { color: #9F1239; }
+.score-form { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 12px 16px; background: var(--turf-1); border: 1px solid var(--turf-2); border-radius: 14px; }
+.score-form > span { font-family: var(--display); font-weight: 800; font-size: 1.2rem; }
+.score-form input {
+  width: 64px; text-align: center; padding: 6px; border-radius: 10px; border: 1px solid var(--turf-3); background: var(--turf-0);
+  font-family: var(--display); font-weight: 900; font-size: 1.8rem; font-variant-numeric: tabular-nums;
+}
+.score-form .btn { margin-left: auto; }
+.saved-result { margin: 0; padding: 12px 16px; border-radius: 14px; background: rgb(255 231 163 / .08); border: 1px solid rgb(255 231 163 / .3); }
+.saved-result b { font-family: var(--display); font-weight: 900; font-size: 1.3rem; }
+.sub-h { margin: 36px 0 12px; }
+.table-wrap { overflow-x: auto; border: 1px solid var(--turf-2); border-radius: 14px; background: var(--turf-1); }
+.standings { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+.standings th, .standings td { padding: 10px 8px; text-align: center; white-space: nowrap; }
+.standings th { font-size: .8rem; font-weight: 500; color: var(--chalk-dim); border-bottom: 1px solid var(--turf-2); }
+.standings td { border-bottom: 1px solid rgb(42 99 64 / .4); }
+.standings tr:last-child td { border-bottom: 0; }
+.standings .l { text-align: left; font-weight: 500; }
+.standings td:first-child { color: var(--chalk-dim); width: 2.5em; }
+.standings .pts { font-family: var(--display); font-weight: 900; font-size: 1.3rem; color: var(--flood); }
+.standings tbody tr:first-child .pts { text-shadow: 0 0 14px rgb(255 231 163 / .45); }
+.standings tr.idle { opacity: .5; }
+.matches { list-style: none; padding: 0; margin: 0; display: grid; gap: 10px; max-width: 760px; }
+.matches li { display: grid; gap: 6px; padding: 12px 16px; background: var(--turf-1); border: 1px solid var(--turf-2); border-radius: 14px; }
+.m-top { display: flex; justify-content: space-between; align-items: center; gap: 8px; font-size: .85rem; }
+.m-score { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: 12px; font-family: var(--display); font-weight: 800; font-size: 1.15rem; }
+.m-score b { font-weight: 900; font-size: 1.7rem; }
+.m-score .tb { text-align: right; }
+.m-teams { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; font-size: .8rem; color: var(--chalk-dim); }
+.m-teams span:last-child { text-align: right; }
+`;
+// id: paylaşılan tek dosyalık kopyada stil zaten gömülüdür; ikinci kez eklenmesin.
+if (typeof document !== 'undefined' && !document.getElementById('app-css')) document.head.insertAdjacentHTML('beforeend', `<style id="app-css">${APP_CSS}</style>`);
+if (typeof module !== 'undefined') module.exports = { APP_CSS };
+</script>
+</head>
+<body>
+  <header class="top">
+    <a class="brand" href="#oyuncular">Halı Saha Kadro</a>
+    <nav class="tabs" aria-label="Bölümler">
+      <a href="#oyuncular" data-tab="oyuncular">Oyuncular</a>
+      <a href="#mac" data-tab="mac">Maç</a>
+    <a href="#puan" data-tab="puan">Puan durumu</a>
+      <a href="#yedek" data-tab="yedek">Yedek</a>
+    </nav>
+  </header>
+  <main id="main"></main>
+  <p id="toast" role="status" hidden></p>
+  <script>/* balance.js */
+// Takım bölme ve diziliş mantığı. Saf fonksiyonlar: DOM yok.
+// Tarayıcıda <script src> ile global olarak, Node'da require ile kullanılır.
+const ATTACK = ['shot', 'pass', 'dribble', 'pace'];
+const DEFENSE = ['defense', 'physical'];
+const ATTRS = [...ATTACK, ...DEFENSE, 'goalkeeping'];
+const FORMATIONS = {
+  '5v5': { GK: 1, DEF: 2, MID: 1, FWD: 1 },
+  '6v6': { GK: 1, DEF: 2, MID: 2, FWD: 1 },
+  '7v7': { GK: 1, DEF: 3, MID: 2, FWD: 1 },
+};
+const OUTFIELD = ['DEF', 'MID', 'FWD'];
+// Pozisyon için en belirleyici özellik.
+const BEST = { DEF: 'defense', MID: 'pass', FWD: 'shot' };
+
+// Puanlar 1–100 arası. Girilmemiş özellik 50 sayılır.
+const withDefaults = p => ({
+  ...p,
+  positions: p.positions ?? [],
+  ...Object.fromEntries(ATTRS.map(k => [k, p[k] ?? 50])),
+});
+
+const sumOf = (ps, keys) => ps.reduce((s, p) => s + keys.reduce((t, k) => t + p[k], 0), 0);
+const round1 = x => Math.round(x * 10) / 10;
+// Genel puan: 6 saha özelliğinin ortalaması + maç sonuçlarından gelen form.
+const overall = p => sumOf([p], [...ATTACK, ...DEFENSE]) / 6 + (p.form ?? 0);
+
+const teamTotals = ps => {
+  ps = ps.map(withDefaults);
+  return {
+    overall: round1(ps.reduce((s, p) => s + overall(p), 0)),
+    attack: round1(sumOf(ps, ATTACK)),
+    defense: round1(sumOf(ps, DEFENSE)),
+  };
+};
+
+// Kaleciyi tercih edenler önce, sonra kalecilik puanı yüksek olan.
+const keeperOrder = (x, y) =>
+  y.positions.includes('GK') - x.positions.includes('GK') || y.goalkeeping - x.goalkeeping;
+
+function* combinations(n, k, start = 0, picked = []) {
+  if (picked.length === k) { yield picked; return; }
+  for (let i = start; i <= n - (k - picked.length); i++) yield* combinations(n, k, i + 1, [...picked, i]);
+}
+
+const positionGaps = (team, format) => OUTFIELD.reduce((s, pos) =>
+  s + Math.max(0, FORMATIONS[format][pos] - team.filter(p => p.positions.includes(pos)).length), 0);
+
+function cost(a, b, format, keepers) {
+  const ta = teamTotals(a), tb = teamTotals(b);
+  // Puan farkları /10: 100'lük ölçekte de pozisyon cezası (1) ve kaleci cezası (100) aynı ağırlıkta kalır.
+  let c = (3 * Math.abs(ta.overall - tb.overall)
+    + Math.abs(ta.attack - tb.attack)
+    + Math.abs(ta.defense - tb.defense)) / 10
+    + positionGaps(a, format) + positionGaps(b, format);
+  if (keepers.size === 2 && a.filter(p => keepers.has(p.id)).length !== 1) c += 100;
+  return c;
+}
+
+// ponytail: tüm bölmeler denenir; 20 kişiye kadar anlık (C(20,10)/2 ≈ 92 bin). Daha kalabalık grup olursa yerel arama.
+function splitTeams(players, format, { together = [], apart = [] } = {}) {
+  if (players.length < 2) return [];
+  players = players.map(withDefaults);
+  const n = players.length, k = Math.floor(n / 2);
+  const keepers = new Set([...players].sort(keeperOrder).slice(0, 2).map(p => p.id));
+  const results = [];
+  for (const idx of combinations(n, k)) {
+    if (n % 2 === 0 && idx[0] !== 0) continue; // eşit boyda her bölme iki kez çıkar; 0. oyuncu A'da olanı tut
+    const inA = new Set(idx.map(i => players[i].id));
+    if (together.some(([x, y]) => inA.has(x) !== inA.has(y))) continue;
+    if (apart.some(([x, y]) => inA.has(x) === inA.has(y))) continue;
+    const a = players.filter(p => inA.has(p.id)), b = players.filter(p => !inA.has(p.id));
+    results.push({ a, b, cost: cost(a, b, format, keepers) });
+  }
+  return results.sort((x, y) => x.cost - y.cost);
+}
+
+// En iyi bölmeye "slack" kadar yakın olanları karışık sırayla döndürür: her kurulumda farklı ama dengeli takımlar.
+function balancedChoices(splits, slack, rand = Math.random) {
+  if (!splits.length) return [];
+  const good = splits.filter(s => s.cost <= splits[0].cost + slack);
+  for (let i = good.length - 1; i > 0; i--) { // Fisher–Yates
+    const j = Math.floor(rand() * (i + 1));
+    [good[i], good[j]] = [good[j], good[i]];
+  }
+  return good;
+}
+
+function assignPositions(team, format) {
+  const left = team.map(withDefaults).sort(keeperOrder);
+  const out = left.length ? [{ id: left.shift().id, pos: 'GK' }] : [];
+  const take = (p, pos) => { left.splice(left.indexOf(p), 1); out.push({ id: p.id, pos }); };
+  const slots = OUTFIELD.flatMap(pos => Array(FORMATIONS[format][pos]).fill(pos));
+  const open = [];
+  // Önce tercihe göre: en az pozisyon seçmiş olan (en kısıtlı) öncelikli.
+  for (const pos of slots) {
+    const fans = left.filter(p => p.positions.includes(pos))
+      .sort((x, y) => x.positions.length - y.positions.length || y[BEST[pos]] - x[BEST[pos]]);
+    if (fans.length) take(fans[0], pos); else open.push(pos);
+  }
+  // Kalan yerler: o pozisyonun özelliği en yüksek olan.
+  for (const pos of open) {
+    if (!left.length) break;
+    take([...left].sort((x, y) => y[BEST[pos]] - x[BEST[pos]])[0], pos);
+  }
+  return [...out, ...left.map(p => ({ id: p.id, pos: 'SUB' }))];
+}
+
+function swap(lineup, x, y) {
+  const next = structuredClone(lineup);
+  const all = [...next.a, ...next.b];
+  const sx = all.find(s => s.id === x), sy = all.find(s => s.id === y);
+  [sx.id, sy.id] = [sy.id, sx.id];
+  return next;
+}
+
+// ---------------- Maç sonuçları ----------------
+const FORM_STEP = 1, FORM_CAP = 10;
+const round2 = x => Math.round(x * 100) / 100;
+
+// Kazananların formu +step, kaybedenlerin -step (±cap ile sınırlı). Girdiyi değiştirmez.
+// deltas: gerçekten uygulanan değişim; maç silinirse revertResult ile geri alınır.
+function applyResult(players, a, b, scoreA, scoreB, step = FORM_STEP, cap = FORM_CAP) {
+  const sign = Math.sign(scoreA - scoreB);
+  const deltas = {};
+  const next = players.map(p => {
+    const s = a.includes(p.id) ? sign : b.includes(p.id) ? -sign : 0;
+    if (!s) return p;
+    const before = p.form ?? 0;
+    const after = round2(Math.max(-cap, Math.min(cap, before + s * step)));
+    deltas[p.id] = round2(after - before);
+    return { ...p, form: after };
+  });
+  return { players: next, deltas };
+}
+
+function revertResult(players, deltas) {
+  return players.map(p => (p.id in deltas ? { ...p, form: round2((p.form ?? 0) - deltas[p.id]) } : p));
+}
+
+// Puan durumu: galibiyet 3, beraberlik 1. Sıra: puan, galibiyet yüzdesi, oynanan maç, ad.
+function standings(players, history) {
+  const rows = new Map(players.map(p => [p.id,
+    { id: p.id, name: p.name, played: 0, won: 0, drawn: 0, lost: 0, points: 0, form: p.form ?? 0 }]));
+  for (const h of history) {
+    for (const [ids, mine, theirs] of [[h.a, h.scoreA, h.scoreB], [h.b, h.scoreB, h.scoreA]]) {
+      for (const id of ids) {
+        const r = rows.get(id);
+        if (!r) continue; // silinmiş oyuncu
+        r.played++;
+        if (mine > theirs) { r.won++; r.points += 3; } else if (mine === theirs) { r.drawn++; r.points += 1; } else r.lost++;
+      }
+    }
+  }
+  return [...rows.values()]
+    .map(r => ({ ...r, winPct: r.played ? Math.round((100 * r.won) / r.played) : 0 }))
+    .sort((x, y) => y.points - x.points || y.winPct - x.winPct || y.played - x.played || x.name.localeCompare(y.name, 'tr'));
+}
+
+// Eski (1–10) veriyi bir kez 100'lük ölçeğe çevirir; scale: 100 işaretli veriye dokunmaz. Girdiyi yerinde değiştirir.
+function toScale100(d) {
+  if (d.scale === 100) return d;
+  for (const p of d.players ?? []) {
+    for (const k of ATTRS) if (Number.isFinite(p[k])) p[k] = Math.min(100, Math.round(p[k] * 10));
+    if (Number.isFinite(p.form)) p.form = round2(p.form * 10);
+  }
+  for (const h of d.history ?? []) for (const id in h.deltas ?? {}) h.deltas[id] = round2(h.deltas[id] * 10);
+  d.scale = 100;
+  return d;
+}
+
+if (typeof module !== 'undefined') {
+  module.exports = { ATTACK, DEFENSE, ATTRS, FORMATIONS, withDefaults, overall, teamTotals, splitTeams, balancedChoices, assignPositions, swap,
+    applyResult, revertResult, standings, toScale100 };
+}
+</script>
+  <script>/* render.js */
+// Saf HTML/SVG üreticileri: FUT kartı, saha, skor tabelası, kadro listesi ve paylaşılabilir statik sayfa.
+// DOM kullanmaz. Tarayıcıda balance.js'ten sonra <script> ile, Node'da (paylas.js) require ile yüklenir.
+const SHORT = { GK: 'KL', DEF: 'DEF', MID: 'OS', FWD: 'FV', SUB: 'YDK' };
+const CARD_LABEL = { shot: 'ŞUT', pass: 'PAS', dribble: 'TOP', pace: 'HIZ', defense: 'SAV', physical: 'FİZ', goalkeeping: 'KAL' };
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => `&#${c.charCodeAt(0)};`);
+const ovr = p => overall(withDefaults(p));
+// Puanlar 100 üzerinden, FIFA gibi tam sayı gösterilir.
+const fmt = n => String(Math.round(n));
+// Maç sonuçlarından gelen form: ▲0.3 / ▼0.2
+const formTag = f => f
+  ? `<span class="form-tag ${f > 0 ? 'up' : 'down'}" title="Maç sonuçlarından gelen form">${f > 0 ? '▲' : '▼'}${Math.round(Math.abs(f))}</span>`
+  : '';
+
+// ---------------- FUT kartı ----------------
+function card(p, attrs = '') {
+  const o = ovr(p);
+  const tier = o >= 70 ? 'gold' : o >= 50 ? 'silver' : 'bronze';
+  const stats = ['pace', 'shot', 'pass', 'dribble', 'defense', 'physical']
+    .map(k => `<div><dd>${p[k]}</dd><dt>${CARD_LABEL[k]}</dt></div>`).join('');
+  return `<button type="button" class="fut ${tier}" ${attrs}>
+    <span class="fut-left">
+      <span class="fut-rating">${fmt(o)}</span>
+      ${p.positions.map(x => `<span class="fut-pos">${SHORT[x]}</span>`).join('')}
+      ${formTag(p.form)}
+    </span>
+    <span class="fut-mono" aria-hidden="true">${esc(p.name.trim().charAt(0).toLocaleUpperCase('tr'))}</span>
+    <span class="fut-name">${esc(p.name)}</span>
+    <dl class="fut-stats">${stats}</dl>
+    <span class="fut-gk">${CARD_LABEL.goalkeeping} <b>${p.goalkeeping}</b></span>
+  </button>`;
+}
+
+// ---------------- Saha çizimi ----------------
+const W = 360, H = 560;
+// Takımın kendi kalesinden uzaklık, saha yüksekliğine oranla. Kırmızı üst yarı, Mavi alt yarı.
+const ROW = { GK: 0.07, DEF: 0.185, MID: 0.305, FWD: 0.42 };
+const COLOR = { a: '#EF4B3F', b: '#3D7BFF' };
+const JERSEY = 'M-15,-15 L-6,-19 Q0,-14 6,-19 L15,-15 L22,-5 L14,-1 L14,18 L-14,18 L-14,-1 L-22,-5 Z';
+const FONT = `font-family="Big Shoulders Display, Arial Narrow, sans-serif"`;
+
+// title: PNG için üstte skor bandı.
+function pitchSvg(lineup, byId, selected, title) {
+  const top = title ? 70 : 0;
+  const marks = [];
+  let i = 0;
+  for (const t of ['a', 'b']) {
+    for (const pos of Object.keys(ROW)) {
+      const row = lineup[t].filter(s => s.pos === pos);
+      row.forEach((s, k) => {
+        const x = (W * (k + 1)) / (row.length + 1);
+        const y = top + H * (t === 'a' ? ROW[pos] : 1 - ROW[pos]);
+        const p = byId.get(s.id);
+        const sel = s.id === selected;
+        marks.push(`<g class="pl" data-id="${esc(s.id)}" transform="translate(${x} ${y})"><g style="--i:${i++}">
+          ${sel ? `<path d="${JERSEY}" fill="none" stroke="#FFE7A3" stroke-width="7" opacity=".6"/>` : ''}
+          <path d="${JERSEY}" fill="${COLOR[t]}" stroke="${sel ? '#FFE7A3' : '#fff'}" stroke-width="${sel ? 2.5 : 1.5}" stroke-linejoin="round"/>
+          <text y="9" text-anchor="middle" ${FONT} font-size="17" font-weight="900" fill="#fff">${p ? fmt(ovr(p)) : '?'}</text>
+          <text y="36" text-anchor="middle" ${FONT} font-size="15" font-weight="800" fill="#fff" stroke="#0B2318" stroke-width="3.5" paint-order="stroke">${p ? esc(p.name) : '?'}</text>
+        </g></g>`);
+      });
+    }
+  }
+  const stripes = Array.from({ length: 10 }, (_, k) =>
+    `<rect y="${top + (k * H) / 10}" width="${W}" height="${H / 10}" fill="${k % 2 ? '#1E6B3C' : '#237744'}"/>`).join('');
+  const band = title ? `<rect width="${W}" height="${top}" fill="#06120C"/>
+    <rect width="6" height="${top}" fill="${COLOR.a}"/><rect x="${W - 6}" width="6" height="${top}" fill="${COLOR.b}"/>
+    <text x="18" y="28" ${FONT} font-size="16" font-weight="800" fill="#EEF3E8">Kırmızı</text>
+    <text x="18" y="58" ${FONT} font-size="30" font-weight="900" fill="#FFE7A3">${title.a}</text>
+    <text x="${W - 18}" y="28" text-anchor="end" ${FONT} font-size="16" font-weight="800" fill="#EEF3E8">Mavi</text>
+    <text x="${W - 18}" y="58" text-anchor="end" ${FONT} font-size="30" font-weight="900" fill="#FFE7A3">${title.b}</text>
+    <text x="${W / 2}" y="30" text-anchor="middle" ${FONT} font-size="15" font-weight="800" fill="#9DB8A6">${title.date}</text>
+    <text x="${W / 2}" y="55" text-anchor="middle" ${FONT} font-size="15" font-weight="800" fill="#EEF3E8">fark ${title.diff}</text>` : '';
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H + top}" width="${W}" height="${H + top}">
+    <defs>
+      <radialGradient id="floodTop" cx=".5" cy="-.05" r=".75"><stop offset="0" stop-color="#FFF6D6" stop-opacity=".2"/><stop offset="1" stop-color="#FFF6D6" stop-opacity="0"/></radialGradient>
+      <radialGradient id="floodBottom" cx=".5" cy="1.05" r=".75"><stop offset="0" stop-color="#FFF6D6" stop-opacity=".2"/><stop offset="1" stop-color="#FFF6D6" stop-opacity="0"/></radialGradient>
+    </defs>
+    ${band}${stripes}
+    <g transform="translate(0 ${top})">
+      <rect width="${W}" height="${H}" fill="url(#floodTop)"/><rect width="${W}" height="${H}" fill="url(#floodBottom)"/>
+      <g fill="none" stroke="#EEF3E8" stroke-width="2" opacity=".75">
+        <rect x="8" y="8" width="${W - 16}" height="${H - 16}" rx="3"/>
+        <line x1="8" y1="${H / 2}" x2="${W - 8}" y2="${H / 2}"/>
+        <circle cx="${W / 2}" cy="${H / 2}" r="44"/>
+        <path d="M${W / 2 - 70},8 v46 a14 14 0 0 0 14 14 h112 a14 14 0 0 0 14 -14 v-46"/>
+        <path d="M${W / 2 - 70},${H - 8} v-46 a14 14 0 0 1 14 -14 h112 a14 14 0 0 1 14 14 v46"/>
+      </g>
+      <circle cx="${W / 2}" cy="${H / 2}" r="3" fill="#EEF3E8"/>
+    </g>
+    ${marks.join('')}</svg>`;
+}
+
+// ---------------- Skor tabelası ve kadro listesi ----------------
+function scoreboard(lineup, byId) {
+  const tot = t => teamTotals(lineup[t].map(s => byId.get(s.id)).filter(Boolean));
+  const A = tot('a'), B = tot('b');
+  const diff = fmt(Math.abs(A.overall - B.overall));
+  const bar = (label, a, b) => `<div class="bar"><span class="label">${label}</span>
+    <span>${Math.round(a)}</span><div class="track"><i style="flex:${a}"></i><i style="flex:${b}"></i></div><span>${Math.round(b)}</span></div>`;
+  const html = `<div class="scoreboard">
+      <div class="sb-team red"><div><span class="sb-name">Kırmızı</span><small>${lineup.a.length} oyuncu</small></div><span class="sb-score">${fmt(A.overall)}</span></div>
+      <div class="sb-mid"><b>${diff}</b><span>fark</span></div>
+      <div class="sb-team blue"><span class="sb-score">${fmt(B.overall)}</span><div><span class="sb-name">Mavi</span><small>${lineup.b.length} oyuncu</small></div></div>
+    </div>
+    <div class="bars">${bar('Hücum', A.attack, B.attack)}${bar('Savunma', A.defense, B.defense)}</div>`;
+  return { html, A, B, diff };
+}
+
+function roster(lineup, t, byId, selected) {
+  const [cls, name] = t === 'a' ? ['red', 'Kırmızı'] : ['blue', 'Mavi'];
+  return `<div class="team ${cls}"><h2><span>${name}</span><small class="dim">${lineup[t].length} kişi</small></h2>
+    <ul>${lineup[t].map(s => {
+      const p = byId.get(s.id);
+      return `<li class="${s.pos === 'SUB' ? 'sub' : ''}"><button type="button" class="pl ${s.id === selected ? 'sel' : ''}" data-id="${esc(s.id)}">
+        <span class="tag">${SHORT[s.pos]}</span><span>${esc(p?.name ?? '?')}</span><span class="rt">${p ? fmt(ovr(p)) : ''}</span></button></li>`;
+    }).join('')}</ul></div>`;
+}
+
+// ---------------- Puan durumu ve maç geçmişi ----------------
+function standingsTable(rows) {
+  if (!rows.some(r => r.played)) return '<div class="empty">Henüz maç sonucu yok. Maç ekranında sonucu kaydedince tablo dolar.</div>';
+  return `<div class="table-wrap"><table class="standings">
+    <thead><tr><th>#</th><th class="l">Oyuncu</th><th title="Oynadığı maç">O</th><th title="Galibiyet">G</th><th title="Beraberlik">B</th><th title="Mağlubiyet">M</th><th title="Galibiyet yüzdesi">%</th><th>Form</th><th>Puan</th></tr></thead>
+    <tbody>${rows.map((r, i) => `<tr class="${r.played ? '' : 'idle'}">
+      <td>${i + 1}</td><td class="l">${esc(r.name)}</td><td>${r.played}</td><td>${r.won}</td><td>${r.drawn}</td><td>${r.lost}</td>
+      <td>${r.played ? r.winPct : '–'}</td><td>${formTag(r.form) || '<span class="dim">–</span>'}</td><td class="pts">${r.points}</td></tr>`).join('')}</tbody>
+  </table></div>`;
+}
+
+// En yeni maç üstte. withDelete: düzenleyen kişi için "Sil" düğmesi.
+function historyList(history, byId, withDelete = false) {
+  if (!history.length) return '';
+  const names = ids => ids.map(id => esc(byId.get(id)?.name ?? '?')).join(', ');
+  return `<ul class="matches">${[...history].reverse().map(h => `<li>
+      <div class="m-top"><span class="dim">${new Date(h.date).toLocaleDateString('tr-TR', { day: 'numeric', month: 'long', year: 'numeric' })}, ${esc(h.format)}</span>
+        ${withDelete ? `<button class="btn quiet small" data-del="${esc(h.id)}">Sil</button>` : ''}</div>
+      <div class="m-score"><span class="ta">Kırmızı</span><b>${h.scoreA} – ${h.scoreB}</b><span class="tb">Mavi</span></div>
+      <div class="m-teams"><span>${names(h.a)}</span><span>${names(h.b)}</span></div>
+    </li>`).join('')}</ul>`;
+}
+
+// ---------------- Paylaşılabilir statik içerik ----------------
+// JavaScript gerektirmeyen bölümler: son kadro, puan durumu, kartlar. Bölüm id'leri uygulamanın
+// sekmeleriyle aynı (#mac, #puan, #oyuncular), böylece üstteki sekme linkleri JS olmadan da çalışır.
+function staticSections(d) {
+  const byId = new Map(d.players.map(p => [p.id, p]));
+  const m = d.match ?? {}, l = m.lineup;
+  const when = d.savedAt ? new Date(d.savedAt).toLocaleString('tr-TR', { day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' }) : '';
+  const ps = [...d.players].sort((a, b) => ovr(b) - ovr(a));
+  const hist = Array.isArray(d.history) ? d.history : [];
+  const kadro = l
+    ? `${scoreboard(l, byId).html}
+      <div class="field-wrap"><div class="pitch">${pitchSvg(l, byId)}</div>
+      <div class="teams">${roster(l, 'a', byId)}${roster(l, 'b', byId)}</div></div>`
+    : '<div class="empty">Bu hafta için kadro henüz kurulmadı.</div>';
+  return `<div class="static">
+  <section id="mac" class="stage">
+    <div class="head"><div><h1>Son kadro</h1><p>${esc(m.format ?? '')}${when ? `, ${when}` : ''}</p></div></div>
+    ${kadro}
+  </section>
+  <section id="puan">
+    <div class="head"><div><h1>Puan durumu</h1><p>Galibiyet 3, beraberlik 1 puan.</p></div></div>
+    ${standingsTable(standings(d.players, hist))}
+    ${hist.length ? `<h2 class="sub-h">Son maçlar</h2>${historyList(hist.slice(-5), byId)}` : ''}
+  </section>
+  <section id="oyuncular">
+    <div class="head"><div><h1>Oyuncular</h1><p>${ps.length} oyuncu, genel puana göre.</p></div></div>
+    <div class="cards">${ps.map(p => card(p, 'disabled')).join('')}</div>
+  </section>
+</div>`;
+}
+
+// Tek dosya, JavaScript yok: WhatsApp'ın iPhone önizlemesinde de açılır.
+function staticPage(d, css) {
+  return `<!doctype html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Halı Saha Kadro</title>
+<link href="https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@600;800;900&family=Rubik:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>${css}</style>
+</head>
+<body>
+<header class="top">
+  <span class="brand">Halı Saha Kadro</span>
+  <nav class="tabs" aria-label="Bölümler"><a href="#mac" class="active">Kadro</a><a href="#puan">Puan durumu</a><a href="#oyuncular">Oyuncular</a></nav>
+</header>
+<main>${staticSections(d)}</main>
+</body>
+</html>
+`;
+}
+
+if (typeof module !== 'undefined') module.exports = { card, pitchSvg, scoreboard, roster, standingsTable, historyList, staticSections, staticPage };
+</script>
+  <script>/* app.js */
+// Kişisel kadro kurucu. Veriler bu tarayıcıda (localStorage) saklanır; "Yedek" sekmesinden dosyaya alınır.
+const KEY = 'halisaha-kadro';
+const POS = { GK: 'Kaleci', DEF: 'Defans', MID: 'Orta saha', FWD: 'Forvet' };
+const LABEL = { shot: 'Şut', pass: 'Pas', dribble: 'Top sürme', pace: 'Hız', defense: 'Savunma', physical: 'Fizik', goalkeeping: 'Kalecilik' };
+const $ = id => document.getElementById(id);
+const main = $('main');
+const newId = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+
+// İlk açılışta örnek oyuncular (1–10 yazılıp ×10 ile 100'lük ölçeğe çevrilir): [ad, pozisyonlar, şut, pas, top sürme, hız, savunma, fizik, kalecilik]
+const SAMPLE = [
+  ['Mete', ['MID'], 6, 8, 6, 5, 6, 6, 4], ['Ali', ['DEF', 'GK'], 4, 5, 4, 5, 7, 7, 8],
+  ['Burak', ['FWD'], 9, 7, 8, 8, 3, 6, 2], ['Can', ['DEF', 'GK'], 3, 4, 3, 4, 6, 7, 7],
+  ['Deniz', ['MID'], 7, 8, 8, 7, 5, 5, 3], ['Emre', ['DEF'], 5, 6, 5, 6, 8, 8, 4],
+  ['Furkan', ['FWD'], 8, 6, 7, 9, 4, 6, 3], ['Gökhan', ['MID'], 5, 6, 5, 5, 5, 6, 5],
+  ['Hakan', ['DEF'], 4, 5, 4, 4, 7, 8, 5], ['İlker', ['FWD'], 7, 5, 6, 7, 3, 5, 2],
+  ['Kerem', ['MID', 'FWD'], 6, 7, 7, 6, 6, 5, 4], ['Murat', ['DEF'], 3, 4, 3, 5, 6, 6, 6],
+  ['Onur', ['FWD', 'MID'], 8, 7, 8, 8, 4, 6, 3],
+];
+const fresh = () => ({
+  players: SAMPLE.map(([name, positions, ...v]) => ({ id: newId(), name, positions, ...Object.fromEntries(ATTRS.map((k, i) => [k, v[i] * 10])) })),
+  match: { format: '6v6', coming: [], locks: { together: [], apart: [] }, lineup: null },
+  history: [], // kaydedilen maç sonuçları
+  scale: 100,  // puanlar 100 üzerinden
+});
+const history = () => (db.history ??= []); // eski verilerde geçmiş yok
+
+// Depolama: claude.ai'de yayınlanmışsa ortak veritabanı (telefon ve bilgisayar aynı veriyi görür),
+// yerel dosya olarak açılmışsa bu tarayıcının localStorage'ı.
+const inArtifact = typeof window.claude?.use === 'function';
+// Arkadaşlar için yayınlanan site (site.html): veriyi data.json'dan okur, hiçbir şey değiştirmez.
+const READONLY = window.KADRO_READONLY === true;
+// Tek dosyalık uygulamanın açılış anındaki hali (henüz çizilmemiş). "HTML'i indir" bunu kopyalayıp içine güncel veriyi gömer.
+const PRISTINE = document.documentElement.outerHTML;
+const SINGLE_FILE = !document.querySelector('script[src]');
+let remote = null;          // claude.ai db belgesi
+let db = null;              // { players, match }
+let needsSetup = false;     // ortak veritabanı boş: ilk kurulum ekranı
+
+function loadLocal() {
+  try { const d = JSON.parse(localStorage.getItem(KEY)); if (d) return d; } catch {}
+  return null;
+}
+
+let writing = false, dirty = false, saveTimer = null;
+async function flush() {
+  if (writing) { dirty = true; return; }
+  writing = true;
+  do {
+    dirty = false;
+    try { await remote.set(JSON.parse(JSON.stringify(db))); }
+    catch (e) { toast(e?.code === 'quota_exceeded' ? 'Kayıt alanı doldu.' : 'Kaydedilemedi, bağlantını kontrol et.'); }
+  } while (dirty);
+  writing = false;
+}
+// touch: gerçek bir değişiklik (açılıştaki dönüştürme kaydı değil). Paylaşılan dosyadaki verinin
+// yerel düzenlemeleri ezip ezmeyeceği editedAt ile karşılaştırılarak karar verilir.
+function save(touch = true) {
+  if (READONLY) return;
+  if (touch) db.editedAt = new Date().toISOString();
+  if (remote) { clearTimeout(saveTimer); saveTimer = setTimeout(flush, 300); return; }
+  try { localStorage.setItem(KEY, JSON.stringify(db)); }
+  catch { toast('Kaydedilemedi: tarayıcı depolaması kapalı. Yedek sekmesinden dosyaya al.'); }
+}
+
+async function boot() {
+  if (READONLY) {
+    main.innerHTML = '<p class="dim">Yükleniyor…</p>';
+    try {
+      const res = await fetch('data.json', { cache: 'no-store' });
+      db = res.ok ? parseBackup(await res.text()) : null;
+    } catch { db = null; }
+    if (!db) { main.innerHTML = '<div class="empty">Kadro henüz paylaşılmamış.</div>'; return; }
+    return render();
+  }
+  if (!inArtifact) {
+    const d = loadLocal();
+    db = d ? toScale100(d) : fresh(); // eski 10'luk veri bir kez çevrilir
+    // Paylaşılan dosya: içindeki veri, bu cihazdaki son düzenlemeden yeniyse onu kullan.
+    const seedEl = document.getElementById('kadro-seed');
+    const seed = seedEl && parseBackup(seedEl.textContent);
+    if (seed && (!d || (seed.savedAt ?? '') > (d.editedAt ?? d.savedAt ?? ''))) {
+      db = seed;
+      if (d) setTimeout(() => toast('Paylaşılan son kadro ve puan durumu yüklendi.'), 300);
+    }
+    save(false);
+    return render();
+  }
+  main.innerHTML = '<p class="dim">Yükleniyor…</p>';
+  const store = await window.claude.use('db');
+  if (!store) { const d = loadLocal(); db = d ? toScale100(d) : fresh(); return render(); } // oturum kapalı: bu cihazda sakla
+  remote = store.doc('kadro/state');
+  remote.onSnapshot(snap => {
+    if (snap.metadata.hasPendingWrites) return; // kendi yazmamızın yankısı
+    if (!snap.exists) { if (!db) { needsSetup = true; render(); } return; }
+    const data = toScale100(structuredClone(snap.data()));
+    if (db && JSON.stringify(data) === JSON.stringify(db)) return;
+    db = data;
+    needsSetup = false;
+    if (!editing) render(); // başka cihazdan gelen değişiklik
+  }, () => toast('Ortak veriye bağlantı koptu. Sayfayı yenile.'));
+}
+
+function toast(msg) {
+  const t = $('toast');
+  t.textContent = msg;
+  t.hidden = false;
+  clearTimeout(toast.timer);
+  toast.timer = setTimeout(() => (t.hidden = true), 3000);
+}
+
+// Dosya ver: claude.ai'de platformun kaydetme onayıyla (telefonda paylaşım menüsü), yerelde doğrudan indirme.
+async function download(blob, filename) {
+  if (inArtifact) {
+    const dl = await window.claude.use('downloads');
+    if (!dl) return toast('Bu görünümde dosya kaydedilemiyor.');
+    try { await dl.save({ filename, data: blob }); }
+    catch (e) { if (e?.code !== 'declined') toast('Dosya kaydedilemedi.'); }
+    return;
+  }
+  const a = Object.assign(document.createElement('a'), { href: URL.createObjectURL(blob), download: filename });
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+}
+
+// Dosya adları için yerel tarih (UTC değil): 2026-10-07
+const today = () => {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+};
+
+// WhatsApp'la gönderilecek tek dosyalık, JavaScript'siz sayfa (kadro, puan durumu, kartlar).
+// Tek dosyalık uygulamada: uygulamanın tam kopyası + gömülü veri + JS'siz görünüm (iPhone önizlemesi için).
+// Diğer sürümlerde (claude.ai, site): sadece JS'siz görünüm.
+function downloadHtml() {
+  const data = { ...db, savedAt: new Date().toISOString() };
+  delete data.editedAt;
+  const page = SINGLE_FILE ? appCopy(data) : staticPage(data, APP_CSS);
+  download(new Blob([page], { type: 'text/html' }), `HaliSaha-Kadro-${today()}.html`);
+  toast("HTML indirildi. WhatsApp'ta belge olarak gönder.");
+}
+
+function appCopy(data) {
+  const doc = new DOMParser().parseFromString(PRISTINE, 'text/html');
+  doc.getElementById('kadro-seed')?.remove();
+  // Gömülü stil, onu ekleyen style.js'ten ÖNCE gelmeli; yoksa style.js onu göremeyip ikinci kopyayı ekler.
+  const css = doc.getElementById('app-css');
+  if (css) doc.head.insertBefore(css, doc.head.querySelector('script'));
+  const seed = doc.createElement('script');
+  seed.type = 'application/json';
+  seed.id = 'kadro-seed';
+  seed.textContent = JSON.stringify(data).replace(/</g, '\\u003c'); // isimlerde HTML etiketi olsa bile gömülü veri bozulmaz
+  doc.head.append(seed);
+  doc.getElementById('main').innerHTML = staticSections(data); // JS çalışmazsa görünen içerik
+  return '<!doctype html>' + String.fromCharCode(10) + doc.documentElement.outerHTML;
+}
+
+// Sayfa içi onay (claude.ai'de tarayıcının confirm() penceresi çalışmaz).
+function ask(message, okLabel, danger = false) {
+  return new Promise(resolve => {
+    const el = document.createElement('div');
+    el.className = 'ask';
+    el.innerHTML = `<div class="ask-box" role="dialog" aria-modal="true" aria-label="Onay">
+      <p>${esc(message)}</p>
+      <div class="row"><button class="btn ${danger ? 'danger' : ''}" data-ok>${esc(okLabel)}</button><button class="btn quiet" data-no>Vazgeç</button></div>
+    </div>`;
+    const done = v => { el.remove(); resolve(v); };
+    el.querySelector('[data-ok]').onclick = () => done(true);
+    el.querySelector('[data-no]').onclick = () => done(false);
+    el.onclick = e => { if (e.target === el) done(false); };
+    el.onkeydown = e => { if (e.key === 'Escape') done(false); };
+    document.body.append(el);
+    el.querySelector('[data-no]').focus();
+  });
+}
+
+// ---------------- Oyuncular ----------------
+function playersView() {
+  editing = false;
+  const ps = [...db.players].sort((a, b) => ovr(b) - ovr(a));
+  main.innerHTML = `<div class="head">
+      <div><h1>Oyuncular</h1><p>${ps.length} oyuncu, genel puana göre.${READONLY ? '' : ' Düzenlemek için karta tıkla.'}</p></div>
+      ${READONLY ? '' : '<button class="btn" id="add">Oyuncu ekle</button>'}
+    </div>
+    ${ps.length ? `<div class="cards">${ps.map(p => card(p, READONLY ? 'disabled' : `data-edit="${p.id}"`)).join('')}</div>`
+      : '<div class="empty">Henüz oyuncu yok. İlk oyuncunu ekleyerek başla.</div>'}`;
+  if (READONLY) return;
+  $('add').onclick = () => editView();
+  main.querySelectorAll('[data-edit]').forEach(el => { el.onclick = () => editView(el.dataset.edit); });
+}
+
+let editing = false; // düzenleme formu açıkken başka cihazdan gelen veri formu ezmesin
+function editView(id) {
+  editing = true;
+  const p = db.players.find(x => x.id === id)
+    ?? { name: '', positions: [], ...Object.fromEntries(ATTRS.map(k => [k, 50])) };
+  const slider = k => `<label class="slider"><span>${LABEL[k]}</span>
+      <input type="range" name="${k}" min="1" max="100" value="${p[k]}"><output>${p[k]}</output></label>`;
+  main.innerHTML = `<div class="head"><div><h1>${id ? esc(p.name) : 'Yeni oyuncu'}</h1>
+      <p>Puanları 1–100 arası ver. Kart sen değiştirdikçe güncellenir.</p></div></div>
+    <div class="editor">
+      <div class="preview" id="preview">${card(p)}</div>
+      <form id="f" class="form">
+        <label class="field"><span>Ad</span><input class="input" name="name" required maxlength="16" value="${esc(p.name)}"></label>
+        <div class="field"><span>Oynayabildiği pozisyonlar</span>
+          <div class="pills">${Object.entries(POS).map(([k, v]) =>
+            `<label class="pill"><input type="checkbox" name="positions" value="${k}" ${p.positions.includes(k) ? 'checked' : ''}><span>${v}</span></label>`).join('')}</div>
+        </div>
+        <div class="sliders">
+          <div class="group-label">Hücum</div>${ATTACK.map(slider).join('')}
+          <div class="group-label">Savunma</div>${DEFENSE.map(slider).join('')}
+          <div class="group-label">Kale</div>${slider('goalkeeping')}
+        </div>
+        <div class="row">
+          <button class="btn">Kaydet</button>
+          <button type="button" id="cancel" class="btn quiet">Vazgeç</button>
+          ${id ? '<button type="button" id="del" class="btn danger">Oyuncuyu sil</button>' : ''}
+        </div>
+      </form>
+    </div>`;
+  const form = $('f');
+  const read = () => {
+    const fd = new FormData(form);
+    return { name: fd.get('name').trim(), positions: fd.getAll('positions'), ...Object.fromEntries(ATTRS.map(k => [k, +fd.get(k)])) };
+  };
+  form.oninput = e => {
+    if (e.target.type === 'range') e.target.nextElementSibling.textContent = e.target.value;
+    const d = read();
+    $('preview').innerHTML = card({ ...d, name: d.name || 'Ad' });
+  };
+  form.onchange = form.oninput; // pozisyon kutuları
+  form.onsubmit = e => {
+    e.preventDefault();
+    const data = read();
+    if (!data.name) return toast('Ad boş olamaz.');
+    const target = id && db.players.find(x => x.id === id); // veri bu arada yenilenmiş olabilir
+    if (target) Object.assign(target, data); else db.players.push({ id: id || newId(), ...data });
+    save();
+    toast(`${data.name} kaydedildi.`);
+    playersView();
+  };
+  $('cancel').onclick = playersView;
+  if (id) $('del').onclick = async () => {
+    if (!(await ask(`${p.name} silinsin mi? Kartı ve kadrolardaki yeri kaldırılır.`, 'Oyuncuyu sil', true))) return;
+    const m = db.match;
+    db.players = db.players.filter(x => x.id !== id);
+    m.coming = m.coming.filter(x => x !== id);
+    m.locks.together = m.locks.together.filter(l => !l.includes(id));
+    m.locks.apart = m.locks.apart.filter(l => !l.includes(id));
+    if (m.lineup && [...m.lineup.a, ...m.lineup.b].some(s => s.id === id)) m.lineup = null;
+    save();
+    toast(`${p.name} silindi.`);
+    playersView();
+  };
+}
+
+// Paylaşım menüsü varsa açar (telefon), yoksa PNG indirir.
+async function sharePng(svg, filename) {
+  const img = new Image();
+  img.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg);
+  await img.decode();
+  const c = Object.assign(document.createElement('canvas'), { width: img.width * 2, height: img.height * 2 });
+  c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+  const blob = await new Promise(r => c.toBlob(r, 'image/png'));
+  const file = new File([blob], filename, { type: 'image/png' });
+  if (!inArtifact && navigator.canShare?.({ files: [file] })) {
+    try { return await navigator.share({ files: [file] }); }
+    catch (e) { if (e.name === 'AbortError') return; }
+  }
+  download(blob, filename);
+}
+
+// ---------------- Maç ----------------
+// Rastgelelik payı: en iyi bölmenin maliyetine bu kadar yakın olanlar "dengeli" sayılır (≈ en fazla 1 genel puan fark).
+const SLACK = 3;
+let splits = [], si = 0, selected = null, note = '', enter = false;
+
+function matchView() {
+  const m = db.match;
+  if (READONLY) {
+    const when = db.savedAt ? new Date(db.savedAt).toLocaleString('tr-TR', { day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' }) : '';
+    main.innerHTML = `<div class="head"><div><h1>Son kadro</h1><p>${m.format}${when ? `, ${when} güncellendi` : ''}</p></div></div>
+      <section class="stage" id="result"></section>`;
+    return drawResult();
+  }
+  const ps = [...db.players].sort((a, b) => a.name.localeCompare(b.name, 'tr'));
+  const opts = ps.map(p => `<option value="${p.id}">${esc(p.name)}</option>`).join('');
+  main.innerHTML = `<div class="match">
+    <aside class="setup">
+      <section>
+        <h2>Format</h2>
+        <div class="segmented" role="radiogroup">${Object.keys(FORMATIONS).map(f =>
+          `<label><input type="radio" name="format" value="${f}" ${f === m.format ? 'checked' : ''}><span>${f}</span></label>`).join('')}</div>
+      </section>
+      <section>
+        <h2>Kim geliyor <small id="count"></small></h2>
+        <div class="roster-pick">${ps.map(p => `<label class="chip"><input type="checkbox" value="${p.id}" ${m.coming.includes(p.id) ? 'checked' : ''}>
+          <span><em>${esc(p.name)}</em><b>${fmt(ovr(p))}</b></span></label>`).join('')}</div>
+        <div class="row"><button class="btn quiet small" id="all">Hepsini seç</button><button class="btn quiet small" id="none">Temizle</button></div>
+      </section>
+      <section>
+        <h2>Kilitler <small>isteğe bağlı</small></h2>
+        <form id="lock" class="lock-form">
+          <select name="x" aria-label="Birinci oyuncu">${opts}</select>
+          <select name="y" aria-label="İkinci oyuncu">${opts}</select>
+          <select name="kind" class="kind" aria-label="Kilit türü"><option value="together">aynı takımda oynasın</option><option value="apart">ayrı takımlarda oynasın</option></select>
+          <button class="btn quiet small">Kilit ekle</button>
+        </form>
+        <ul class="locks" id="locks"></ul>
+      </section>
+      <button class="btn big" id="build">Takımları kur</button>
+    </aside>
+    <section class="stage" id="result"></section>
+  </div>`;
+
+  const count = () => {
+    const need = 2 * Object.values(FORMATIONS[m.format]).reduce((s, n) => s + n, 0);
+    const n = m.coming.length;
+    const el = $('count');
+    el.textContent = n === need ? `${n} kişi, tam` : n > need ? `${n} kişi, ${n - need} yedek` : `${n}/${need} kişi`;
+    el.className = n === need ? '' : 'off';
+  };
+  const drawLocks = () => {
+    const name = id => esc(db.players.find(p => p.id === id)?.name ?? '?');
+    const items = [
+      ...m.locks.together.map((l, i) => [`${name(l[0])} ile ${name(l[1])} aynı takımda`, 'together', i]),
+      ...m.locks.apart.map((l, i) => [`${name(l[0])} ile ${name(l[1])} ayrı takımlarda`, 'apart', i]),
+    ];
+    $('locks').innerHTML = items.map(([t, k, i]) =>
+      `<li><span>${t}</span><button class="btn quiet small" data-k="${k}" data-i="${i}">Kaldır</button></li>`).join('');
+    $('locks').querySelectorAll('button').forEach(b => {
+      b.onclick = () => { m.locks[b.dataset.k].splice(+b.dataset.i, 1); save(); drawLocks(); };
+    });
+  };
+  const syncComing = () => {
+    m.coming = [...main.querySelectorAll('.chip input:checked')].map(x => x.value);
+    save();
+    count();
+  };
+
+  main.querySelectorAll('.chip input').forEach(cb => { cb.onchange = syncComing; });
+  const setAll = on => { main.querySelectorAll('.chip input').forEach(cb => { cb.checked = on; }); syncComing(); };
+  $('all').onclick = () => setAll(true);
+  $('none').onclick = () => setAll(false);
+  main.querySelectorAll('[name=format]').forEach(r => { r.onchange = () => { m.format = r.value; save(); count(); }; });
+  $('lock').onsubmit = e => {
+    e.preventDefault();
+    const fd = new FormData(e.target);
+    if (fd.get('x') === fd.get('y')) return toast('Kilit için iki farklı oyuncu seç.');
+    m.locks[fd.get('kind')].push([fd.get('x'), fd.get('y')]);
+    save();
+    drawLocks();
+  };
+  $('build').onclick = build;
+  count();
+  drawLocks();
+  drawResult();
+}
+
+function build() {
+  const m = db.match;
+  const coming = db.players.filter(p => m.coming.includes(p.id));
+  // Gelmeyen oyuncuyu içeren kilit yok sayılır.
+  const here = l => l.every(id => m.coming.includes(id));
+  // En dengeliye yakın bölmeler karışık sırayla: her kurulumda farklı takımlar.
+  splits = balancedChoices(splitTeams(coming, m.format, { together: m.locks.together.filter(here), apart: m.locks.apart.filter(here) }), SLACK);
+  si = 0;
+  note = coming.length < 2 ? 'Takım kurmak için en az 2 kişi seç.' : splits.length ? '' : 'Bu kilitlerle dengeli bölme yok. Bir kilidi kaldırıp tekrar dene.';
+  pick();
+}
+
+function pick() {
+  const m = db.match, s = splits[si];
+  m.lineup = s ? { a: assignPositions(s.a, m.format), b: assignPositions(s.b, m.format) } : null;
+  m.resultId = null; // yeni kadro: sonucu henüz girilmedi
+  selected = null;
+  enter = true;
+  save();
+  drawResult();
+}
+
+function drawResult() {
+  const $r = $('result');
+  const lineup = db.match.lineup;
+  if (!lineup) {
+    const msg = READONLY ? 'Bu hafta için kadro henüz kurulmadı.' : note || 'Soldan gelenleri işaretle, sonra Takımları kur.';
+    $r.innerHTML = `<div class="field-wrap"><div class="pitch">${pitchSvg({ a: [], b: [] }, new Map())}</div>
+      <div><h2>Saha boş</h2><p class="${note ? 'warn' : 'dim'}">${msg}</p></div></div>`;
+    return;
+  }
+  const byId = new Map(db.players.map(p => [p.id, p]));
+  const { html: board, A, B, diff } = scoreboard(lineup, byId);
+  const saved = history().find(h => h.id === db.match.resultId);
+  const resultRow = READONLY ? '' : saved
+    ? `<p class="saved-result">Sonuç kaydedildi: <span class="ta">Kırmızı</span> <b>${saved.scoreA} – ${saved.scoreB}</b> <span class="tb">Mavi</span>. Puan durumu ve formlar güncellendi.</p>`
+    : `<form id="score" class="score-form" aria-label="Maç sonucu">
+        <span class="ta">Kırmızı</span>
+        <input id="score-a" name="a" type="number" min="0" max="99" inputmode="numeric" required aria-label="Kırmızı gol">
+        <span>–</span>
+        <input id="score-b" name="b" type="number" min="0" max="99" inputmode="numeric" required aria-label="Mavi gol">
+        <span class="tb">Mavi</span>
+        <button class="btn">Sonucu kaydet</button>
+      </form>`;
+  $r.innerHTML = `${board}
+    ${resultRow}
+    <div class="row">
+      ${READONLY ? '' : `<button class="btn quiet" id="next" ${splits.length > 1 ? '' : 'disabled'}>Başka öneri${splits.length > 1 ? ` <span class="dim">${si + 1}/${splits.length}</span>` : ''}</button>`}
+      <button class="btn" id="png">Görseli indir</button>
+      ${READONLY ? '' : '<button class="btn quiet" id="html">HTML\'i indir</button>'}
+    </div>
+    <div class="field-wrap">
+      <div class="pitch ${enter ? 'enter' : ''}">${pitchSvg(lineup, byId, selected)}</div>
+      <div class="teams">
+        ${READONLY ? '' : '<p class="hint">Yer değiştirmek için iki oyuncuya sırayla tıkla: sahada ya da listede.</p>'}
+        ${roster(lineup, 'a', byId, selected)}${roster(lineup, 'b', byId, selected)}
+      </div>
+    </div>`;
+  enter = false;
+  $('png').onclick = () => {
+    const date = new Date(db.savedAt || Date.now()).toLocaleDateString('tr-TR', { day: 'numeric', month: 'long' });
+    sharePng(pitchSvg(lineup, byId, null, { a: fmt(A.overall), b: fmt(B.overall), diff, date }),
+      `kadro-${today()}.png`);
+  };
+  if (READONLY) return;
+  $r.onclick = e => {
+    const id = e.target.closest('.pl')?.dataset.id;
+    if (!id) return;
+    if (!selected) selected = id;
+    else { if (selected !== id) db.match.lineup = swap(db.match.lineup, selected, id); selected = null; save(); }
+    drawResult();
+  };
+  $('next').onclick = () => { si = (si + 1) % splits.length; pick(); };
+  $('html').onclick = downloadHtml;
+  const form = $('score');
+  if (form) form.onsubmit = e => {
+    e.preventDefault();
+    const sa = +form.a.value, sb = +form.b.value;
+    const a = lineup.a.map(s => s.id), b = lineup.b.map(s => s.id);
+    const { players, deltas } = applyResult(db.players, a, b, sa, sb);
+    const entry = { id: newId(), date: new Date().toISOString(), format: db.match.format, a, b, scoreA: sa, scoreB: sb, deltas };
+    db.players = players;
+    history().push(entry);
+    db.match.resultId = entry.id;
+    save();
+    toast(sa === sb ? 'Beraberlik kaydedildi.' : `${sa > sb ? 'Kırmızı' : 'Mavi'} kazandı, sonuç kaydedildi.`);
+    drawResult();
+  };
+}
+
+// ---------------- Puan durumu ----------------
+function standingsView() {
+  const hist = history();
+  const byId = new Map(db.players.map(p => [p.id, p]));
+  main.innerHTML = `<div class="head"><div><h1>Puan durumu</h1>
+      <p>Galibiyet 3, beraberlik 1 puan. Form: her galibiyet kart puanına +1, her mağlubiyet −1 ekler (en fazla ±10).</p></div></div>
+    ${standingsTable(standings(db.players, hist))}
+    ${hist.length ? `<h2 class="sub-h">Maç geçmişi</h2>${historyList(hist, byId, !READONLY)}` : ''}`;
+  if (READONLY) return;
+  main.querySelectorAll('[data-del]').forEach(btn => {
+    btn.onclick = async () => {
+      const h = hist.find(x => x.id === btn.dataset.del);
+      if (!h || !(await ask(`${h.scoreA} – ${h.scoreB} biten maç silinsin mi? Puanları ve form etkisi geri alınır.`, 'Maçı sil', true))) return;
+      db.players = revertResult(db.players, h.deltas ?? {});
+      db.history = hist.filter(x => x !== h);
+      if (db.match.resultId === h.id) db.match.resultId = null;
+      save();
+      toast('Maç silindi.');
+      standingsView();
+    };
+  });
+}
+
+// ---------------- Yedek ----------------
+// Yedek dosyasını doğrular; geçersizse null. Kadro, oyuncuları hâlâ varsa korunur.
+function parseBackup(text) {
+  let d;
+  try { d = toScale100(JSON.parse(text)); } catch { return null; }
+  const ok = Array.isArray(d?.players) && d.players.every(p =>
+    p && typeof p.id === 'string' && typeof p.name === 'string' && Array.isArray(p.positions)
+    && ATTRS.every(k => Number.isInteger(p[k]) && p[k] >= 1 && p[k] <= 100));
+  if (!ok) return null;
+  const ids = new Set(d.players.map(p => p.id));
+  const m = d.match && typeof d.match === 'object' ? d.match : fresh().match;
+  m.format = FORMATIONS[m.format] ? m.format : '6v6';
+  m.coming = Array.isArray(m.coming) ? m.coming.filter(id => ids.has(id)) : [];
+  m.locks = { together: m.locks?.together ?? [], apart: m.locks?.apart ?? [] };
+  const slotsOk = l => Array.isArray(l) && l.every(s => ids.has(s?.id) && (SHORT[s.pos]));
+  if (!(m.lineup && slotsOk(m.lineup.a) && slotsOk(m.lineup.b))) m.lineup = null;
+  for (const p of d.players) if (!(Number.isFinite(p.form) && Math.abs(p.form) <= 10)) delete p.form;
+  const history = Array.isArray(d.history) ? d.history.filter(h =>
+    h && typeof h.id === 'string' && Array.isArray(h.a) && Array.isArray(h.b)
+    && Number.isInteger(h.scoreA) && Number.isInteger(h.scoreB)) : [];
+  if (!history.some(h => h.id === m.resultId)) m.resultId = null;
+  return { players: d.players, match: m, history, scale: 100, ...(typeof d.savedAt === 'string' ? { savedAt: d.savedAt } : {}) };
+}
+
+async function importFile(file) {
+  const d = file && parseBackup(await file.text());
+  if (!d) return toast('Bu dosya geçerli bir yedek değil.');
+  if (!needsSetup && !(await ask(`${d.players.length} oyuncu yüklenecek, mevcut veriler silinecek.`, 'Yedeği yükle', true))) return;
+  db = d;
+  needsSetup = false;
+  save();
+  toast(`Yedek yüklendi: ${d.players.length} oyuncu.`);
+  render();
+}
+
+const where = () => remote ? 'claude.ai hesabında saklanır; telefonda ve bilgisayarda aynıdır'
+  : 'bu cihazdaki tarayıcıda saklanır. Tarayıcı verisini silersen kaybolur';
+
+function backupView() {
+  main.innerHTML = `<div class="head"><div><h1>Yedek</h1>
+      <p>Oyuncular ve son kadro ${where()}.</p></div></div>
+    <div class="panel"><h2>Arkadaşlarına gönder</h2><p>Son kadro, puan durumu ve kartlar tek bir HTML dosyasına girer.
+      Dosyayı WhatsApp'ta belge olarak gönder; telefonda internet ve uygulama gerekmeden açılır.</p>
+      <div><button class="btn" id="html">HTML'i indir</button></div></div>
+    <div class="panel"><h2>Yedeği indir</h2><p>Tüm oyuncuları, son kadroyu ve maç geçmişini bir dosyaya kaydeder.</p>
+      <div><button class="btn quiet" id="exp">Yedeği indir</button></div></div>
+    <div class="panel"><h2>Yedekten yükle</h2><p>Mevcut verilerin yerine yedekteki oyuncular ve kadro gelir.</p>
+      <label class="file"><input type="file" id="imp" accept=".json,application/json"></label></div>
+    <div class="panel"><h2>Sıfırla</h2><p>Tüm oyuncular ve maç bilgileri silinir, örnek oyuncularla baştan başlarsın.</p>
+      <div><button class="btn danger" id="reset">Tüm verileri sil</button></div></div>`;
+  $('exp').onclick = () => download(new Blob([JSON.stringify({ ...db, savedAt: new Date().toISOString() }, null, 2)], { type: 'application/json' }),
+    `halisaha-yedek-${today()}.json`);
+  $('html').onclick = downloadHtml;
+  $('imp').onchange = e => importFile(e.target.files[0]);
+  $('reset').onclick = async () => {
+    if (!(await ask('Tüm oyuncular ve maç bilgileri silinecek.', 'Tüm verileri sil', true))) return;
+    db = fresh();
+    save();
+    toast('Tüm veriler silindi.');
+  };
+}
+
+// Ortak veritabanı boşken: bilgisayardaki yedeği aktar ya da örneklerle başla.
+function setupView() {
+  main.innerHTML = `<div class="head"><div><h1>Hoş geldin</h1>
+      <p>Veriler claude.ai hesabında saklanacak; telefonda ve bilgisayarda aynı oyuncuları göreceksin.</p></div></div>
+    <div class="panel"><h2>Bilgisayardaki oyuncularını aktar</h2>
+      <p>Bilgisayardaki uygulamada Yedek sekmesinden "Yedeği indir" de, sonra o dosyayı burada seç.</p>
+      <label class="file"><input type="file" id="imp" accept=".json,application/json"></label></div>
+    <div class="panel"><h2>Sıfırdan başla</h2><p>13 örnek oyuncuyla başlarsın; kartlara tıklayıp kendi oyuncularınla değiştirirsin.</p>
+      <div><button class="btn quiet" id="sample">Örnek oyuncularla başla</button></div></div>`;
+  $('imp').onchange = e => importFile(e.target.files[0]);
+  $('sample').onclick = () => { db = fresh(); needsSetup = false; save(); render(); };
+}
+
+// ---------------- Sekmeler ----------------
+const views = { oyuncular: playersView, mac: matchView, puan: standingsView, yedek: backupView };
+function render() {
+  editing = false;
+  const tab = views[location.hash.slice(1)] ? location.hash.slice(1) : READONLY ? 'mac' : 'oyuncular';
+  document.querySelectorAll('.tabs a').forEach(a => a.classList.toggle('active', !needsSetup && a.dataset.tab === tab));
+  if (needsSetup) return setupView();
+  if (!db) return; // claude.ai verisi yükleniyor
+  views[tab]();
+}
+window.addEventListener('hashchange', render);
+// Aynı sekmeye tekrar tıklanınca da (ör. düzenleme ekranından çıkmak için) yeniden çiz.
+document.querySelectorAll('.tabs a, .brand').forEach(a => { a.onclick = () => { if (location.hash === a.getAttribute('href')) render(); }; });
+boot();
+</script>
+</body>
+</html>
