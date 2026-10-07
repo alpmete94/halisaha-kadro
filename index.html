@@ -311,6 +311,38 @@ main { padding: 28px clamp(16px, 4vw, 40px) 64px; max-width: 1280px; margin: 0 a
 .m-score .tb { text-align: right; }
 .m-teams { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; font-size: .8rem; color: var(--chalk-dim); }
 .m-teams span:last-child { text-align: right; }
+
+/* ---------- Maç analizi (video) ---------- */
+.an-teams { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; margin: 14px 0 20px; }
+.an-teams:has(.an-one) { grid-template-columns: minmax(0, 1fr); max-width: 720px; }
+@media (max-width: 700px) { .an-teams { grid-template-columns: minmax(0, 1fr); } }
+.an-teams figure { margin: 0; }
+.an-teams img { width: 100%; max-width: 100%; border-radius: 10px; display: block; }
+.an-teams figcaption { font-size: .9rem; padding-top: 6px; display: flex; gap: 8px 12px; align-items: center; flex-wrap: wrap; }
+.an-teams figcaption .btn { padding: 6px 12px; margin-left: auto; }
+.mcs { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 14px; }
+.mc { --a: #f4dc8a; --b: #b8913a; --c: #3a2a08; color: var(--c); border: 0; cursor: pointer; font: inherit;
+  padding: 14px 14px 34px; display: grid; gap: 8px; justify-items: center; align-content: start; text-align: center;
+  background: linear-gradient(160deg, var(--a), var(--b) 70%); clip-path: polygon(50% 0, 100% 6%, 100% 88%, 50% 100%, 0 88%, 0 6%);
+  filter: drop-shadow(0 6px 14px rgb(0 0 0 / .45)); transition: transform .15s; }
+.mc:hover { transform: translateY(-3px); }
+.mc:focus-visible { outline: none; filter: drop-shadow(0 0 0 var(--flood)) drop-shadow(0 0 6px var(--flood)); }
+.mc[aria-pressed="true"] { filter: drop-shadow(0 0 0 var(--flood)) drop-shadow(0 0 10px var(--flood)); transform: translateY(-3px); }
+.mc.gumus { --a: #eef1f4; --b: #9aa5b0; --c: #1d2730; }
+.mc.bronz { --a: #e9b98c; --b: #9a5f33; --c: #2e1607; }
+.mc-top { width: 100%; display: flex; justify-content: space-between; align-items: flex-start; padding-top: 8px; }
+.mc-ovr { display: grid; justify-items: center; line-height: .9; }
+.mc-ovr b { font: 900 2.4rem/1 var(--display); }
+.mc-ovr span { font-weight: 700; font-size: .8rem; letter-spacing: .06em; }
+.mc-team { font-size: .68rem; font-weight: 700; padding: 2px 7px; border-radius: 999px; color: #fff; }
+.mc-team.a { background: var(--red); } .mc-team.b { background: var(--blue); }
+.mc-name { font: 900 1.35rem/1 var(--display); text-transform: capitalize; border-bottom: 1.5px solid currentColor; padding-bottom: 4px; width: 100%; overflow-wrap: anywhere; }
+.mc-stats { display: grid; grid-template-columns: 1fr 1fr; gap: 2px 14px; font-size: .78rem; font-weight: 500; letter-spacing: .04em; font-variant-numeric: tabular-nums; text-align: left; }
+.mc-stats b { display: inline-block; min-width: 1.6em; text-align: right; font-size: 1.05rem; font-weight: 700; letter-spacing: 0; }
+.mc-foot { font-size: .7rem; opacity: .8; }
+.mc-legend { display: grid; grid-template-columns: auto 1fr; gap: 4px 12px; margin: 22px 0 0; font-size: .85rem; color: var(--chalk-dim); max-width: 70ch; }
+.mc-legend dt { font-weight: 700; color: var(--chalk); } .mc-legend dd { margin: 0; }
+@media (prefers-reduced-motion: reduce) { .mc, .mc:hover { transition: none; transform: none; } }
 `;
 // id: paylaşılan tek dosyalık kopyada stil zaten gömülüdür; ikinci kez eklenmesin.
 if (typeof document !== 'undefined' && !document.getElementById('app-css')) document.head.insertAdjacentHTML('beforeend', `<style id="app-css">${APP_CSS}</style>`);
@@ -791,7 +823,38 @@ function staticPage(d, css) {
 `;
 }
 
-if (typeof module !== 'undefined') module.exports = { card, pitchSvg, scoreboard, roster, standingsTable, historyList, staticSections, staticPage };
+// Maç analizi (video): analiz/<maç kaydı id>/analiz.json; iki kameradan ölçülen koşu verisi ve FIFA tarzı kartlar.
+const TEAM_NAME = { a: 'Kırmızı', b: 'Mavi' };
+const MEVKI = { KL: 'Kaleci', DEF: 'Defans', OS: 'Orta saha', FV: 'Forvet' };
+function analysisTeamsHtml(a, base) {
+  return ['a', 'b'].map(t => `<figure><img src="${base}/${a.takimlar[t].isi}" alt="${TEAM_NAME[t]} ısı haritası">
+    <figcaption><b>${TEAM_NAME[t]}${a.takimlar[t].yelek ? ' (yelekli)' : ''}</b> <span class="dim">${a.takimlar[t].km} km toplam koşu</span></figcaption></figure>`).join('');
+}
+function analysisPlayerHtml(o, base) {
+  return `<figure class="an-one"><img src="${base}/${o.isi}" alt="${esc(o.ad)} ısı haritası">
+    <figcaption><b>${esc(o.ad)}</b> <span class="dim">${TEAM_NAME[o.taraf]}, ${MEVKI[o.mevki]} · ${o.km.toFixed(1)} km · ${o.kmh} km/s</span>
+    <button class="btn quiet" data-an-teams>Takımları göster</button></figcaption></figure>`;
+}
+function analysisHtml(a, base) {
+  const kart = (o, i) => `<button class="mc ${o.seviye}" data-an="${i}" aria-pressed="false" aria-label="${esc(o.ad)}, genel ${o.genel}, ${MEVKI[o.mevki]}: ısı haritasını göster">
+      <span class="mc-top"><span class="mc-ovr"><b>${o.genel}</b><span>${o.mevki}</span></span><span class="mc-team ${o.taraf}">${TEAM_NAME[o.taraf]}</span></span>
+      <span class="mc-name">${esc(o.ad)}</span>
+      <span class="mc-stats">${Object.entries(o.s).map(([k, v]) => `<span><b>${v}</b> ${k}</span>`).join('')}</span>
+      <span class="mc-foot">${o.km.toFixed(1)} km · ${o.kmh} km/s${o.az ? ' · az görüntü' : ''}</span>
+    </button>`;
+  return `<h2 class="sub-h">Maç analizi</h2>
+    <p class="hint">İki kameradan otomatik ölçüldü: ${Math.round(a.mac_dk)} dakika, devre arası ${Math.round(a.devre_arasi_dk)}. dakikada. Isı haritalarında takımın kendi kalesi hep solda. Bir karta bas: o oyuncunun ısı haritası görünür. Pas, şut ve top tekniği ölçülmedi.</p>
+    <div class="an-teams" id="an-panel" aria-live="polite">${analysisTeamsHtml(a, base)}</div>
+    <div class="mcs">${a.oyuncular.map(kart).join('')}</div>
+    <dl class="mc-legend">
+      <dt>HIZ</dt><dd>En yüksek koşu hızı (2 sn ortalama)</dd><dt>PAT</dt><dd>Patlayıcılık: 10 dakikada kaç kez 20 km/s üstüne çıktı</dd>
+      <dt>DAY</dt><dd>Dayanıklılık: toplam koşu mesafesi</dd><dt>ALN</dt><dd>Sahanın ne kadarını kullandı</dd>
+      <dt>HÜC / SAV</dt><dd>Rakip / kendi kale tarafındaki üçlükte geçen zaman</dd>
+      <dt>Az görüntü</dt><dd>Maçın yarısından azında tanınabildi; puanı daha kaba</dd>
+    </dl>`;
+}
+
+if (typeof module !== 'undefined') module.exports = { card, pitchSvg, scoreboard, roster, standingsTable, historyList, staticSections, staticPage, analysisHtml, analysisTeamsHtml, analysisPlayerHtml };
 </script>
   <script>/* cloud.js */
 // Supabase ortak veri bağlantısı. URL ve anahtar boşsa uygulama bu cihazda (localStorage) çalışır.
@@ -1514,7 +1577,26 @@ function lastMatchView() {
         <div class="pitch">${pitchSvg(lineup, byId)}</div>
         <div class="teams">${roster(lineup, 'a', byId)}${roster(lineup, 'b', byId)}</div>
       </div>
-    </section>`;
+    </section>
+    <section id="analiz"></section>`;
+  // Video analizi varsa (siteyle yayınlanan analiz/<maç id>/analiz.json) altına ekle; yoksa sessizce yok.
+  const base = `analiz/${h.id}`;
+  fetch(`${base}/analiz.json`).then(r => r.ok ? r.json() : null).then(a => {
+    const yer = $('analiz');
+    if (!a || !yer) return;
+    yer.innerHTML = analysisHtml(a, base);
+    const panel = $('an-panel');
+    const sec = i => {
+      yer.querySelectorAll('.mc').forEach(k => k.setAttribute('aria-pressed', String(k.dataset.an === String(i))));
+      panel.innerHTML = i == null ? analysisTeamsHtml(a, base) : analysisPlayerHtml(a.oyuncular[i], base);
+      if (i != null) panel.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    };
+    yer.onclick = e => {
+      const k = e.target.closest('.mc');
+      if (k) return sec(k.getAttribute('aria-pressed') === 'true' ? null : k.dataset.an);
+      if (e.target.closest('[data-an-teams]')) sec(null);
+    };
+  }).catch(() => {});
   $('png').onclick = () => sharePng(
     pitchSvg(lineup, byId, null, { a: String(h.scoreA), b: String(h.scoreB), mid: verdict, date: new Date(h.date).toLocaleDateString('tr-TR', { day: 'numeric', month: 'long' }) }),
     `mac-${h.date.slice(0, 10)}.png`);
