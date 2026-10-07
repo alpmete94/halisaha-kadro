@@ -145,6 +145,8 @@ main { padding: 28px clamp(16px, 4vw, 40px) 64px; max-width: 1280px; margin: 0 a
 .segmented input { position: absolute; opacity: 0; inset: 0; cursor: pointer; }
 .segmented span { display: block; text-align: center; padding: 6px; border-radius: 7px; font-family: var(--display); font-weight: 800; font-size: 1.15rem; color: var(--chalk-dim); }
 .segmented input:checked + span { background: var(--turf-2); color: var(--chalk); }
+.segmented.two { grid-template-columns: 1fr 1fr; }
+.segmented.two span { font-family: var(--text); font-weight: 600; font-size: .95rem; }
 .segmented input:focus-visible + span { outline: 2px solid var(--flood); }
 .roster-pick { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
 .chip { position: relative; }
@@ -330,14 +332,19 @@ if (typeof module !== 'undefined') module.exports = { APP_CSS };
 const ATTACK = ['shot', 'pass', 'dribble', 'pace'];
 const DEFENSE = ['defense', 'physical'];
 const ATTRS = [...ATTACK, ...DEFENSE, 'goalkeeping'];
+// Pozisyonlar: GK kaleci, LB sol bek, CB stoper, RB sağ bek, MID orta saha, FWD forvet.
 const FORMATIONS = {
-  '5v5': { GK: 1, DEF: 2, MID: 1, FWD: 1 },
-  '6v6': { GK: 1, DEF: 2, MID: 2, FWD: 1 },
-  '7v7': { GK: 1, DEF: 3, MID: 2, FWD: 1 },
+  '5v5': { GK: 1, CB: 2, MID: 1, FWD: 1 },
+  '6v6': { GK: 1, CB: 2, MID: 2, FWD: 1 },
+  '7v7': { GK: 1, LB: 1, CB: 1, RB: 1, MID: 2, FWD: 1 },
 };
-const OUTFIELD = ['DEF', 'MID', 'FWD'];
-// Pozisyon için en belirleyici özellik.
-const BEST = { DEF: 'defense', MID: 'pass', FWD: 'shot' };
+const OUTFIELD = ['LB', 'CB', 'RB', 'MID', 'FWD'];
+const DEF_POS = ['CB', 'RB', 'LB'];
+// Pozisyona uygunluk puanı (boş kalan yere kimin geçeceğini seçerken).
+const FIT = {
+  LB: p => p.defense + p.pace, RB: p => p.defense + p.pace, CB: p => p.defense + p.physical,
+  MID: p => p.pass + p.dribble, FWD: p => p.shot + p.pace,
+};
 
 // Puanlar 1–100 arası. Girilmemiş özellik 50 sayılır.
 const withDefaults = p => ({
@@ -351,18 +358,39 @@ const round1 = x => Math.round(x * 10) / 10;
 // Genel puan: 6 saha özelliğinin ortalaması + maç sonuçlarından gelen form.
 const overall = p => sumOf([p], [...ATTACK, ...DEFENSE]) / 6 + (p.form ?? 0);
 
-const teamTotals = ps => {
-  ps = ps.map(withDefaults);
-  return {
-    overall: round1(ps.reduce((s, p) => s + overall(p), 0)),
-    attack: round1(sumOf(ps, ATTACK)),
-    defense: round1(sumOf(ps, DEFENSE)),
-  };
-};
+// Sabit kaleci: önce kaleciliği tercih edenler, yoksa defanslar (stoper/bek), en son herkes;
+// her grupta kalecilik puanı yüksek olan; eşitse genel puanı DÜŞÜK olan (takımın gücü kaleye harcanmasın).
+// Böylece takımın en iyi oyuncusu kaleye geçmez.
+function pickKeeper(team) {
+  const best = list => [...list].sort((x, y) => y.goalkeeping - x.goalkeeping || overall(x) - overall(y))[0];
+  return best(team.filter(p => p.positions.includes('GK')))
+    ?? best(team.filter(p => p.positions.some(x => DEF_POS.includes(x))))
+    ?? best(team) ?? null;
+}
 
-// Kaleciyi tercih edenler önce, sonra kalecilik puanı yüksek olan.
-const keeperOrder = (x, y) =>
-  y.positions.includes('GK') - x.positions.includes('GK') || y.goalkeeping - x.goalkeeping;
+// Takım gücü. mode 'fixed' (sabit kaleci): saha oyuncularının genel puanı + kalecinin KALECİLİK puanı.
+// mode 'rotating' (değişkenli, kaleye sırayla): herkesin genel puanı + takımın kalecilik ortalaması.
+// keeperId: dizilişte elle kaleye konan kişi (yoksa pickKeeper seçer).
+function teamTotals(ps, mode = 'rotating', keeperId) {
+  ps = ps.map(withDefaults);
+  if (!ps.length) return { overall: 0, attack: 0, defense: 0, keeper: 0 };
+  let field = ps, keeper;
+  if (mode === 'fixed') {
+    const k = ps.find(p => p.id === keeperId) ?? pickKeeper(ps);
+    field = ps.filter(p => p !== k);
+    keeper = k.goalkeeping;
+  } else {
+    keeper = ps.reduce((s, p) => s + p.goalkeeping, 0) / ps.length;
+  }
+  return {
+    overall: round1(field.reduce((s, p) => s + overall(p), 0) + keeper),
+    attack: round1(sumOf(field, ATTACK)),
+    // Kaleci savunmanın parçası (2 savunma özelliği ağırlığında). Böylece zayıf kaleli takıma daha güçlü
+    // saha oyuncusu verilerek denge kurulabilir; yoksa telafi "savunma farkı" diye cezalandırılırdı.
+    defense: round1(sumOf(field, DEFENSE) + 2 * keeper),
+    keeper: round1(keeper),
+  };
+}
 
 function* combinations(n, k, start = 0, picked = []) {
   if (picked.length === k) { yield picked; return; }
@@ -370,25 +398,31 @@ function* combinations(n, k, start = 0, picked = []) {
 }
 
 const positionGaps = (team, format) => OUTFIELD.reduce((s, pos) =>
-  s + Math.max(0, FORMATIONS[format][pos] - team.filter(p => p.positions.includes(pos)).length), 0);
+  s + Math.max(0, (FORMATIONS[format][pos] ?? 0) - team.filter(p => p.positions.includes(pos)).length), 0);
 
-function cost(a, b, format, keepers) {
-  const ta = teamTotals(a), tb = teamTotals(b);
-  // Puan farkları /10: 100'lük ölçekte de pozisyon cezası (1) ve kaleci cezası (100) aynı ağırlıkta kalır.
-  let c = (3 * Math.abs(ta.overall - tb.overall)
-    + Math.abs(ta.attack - tb.attack)
-    + Math.abs(ta.defense - tb.defense)) / 10
+function cost(a, b, format, mode, naturalKeepers) {
+  const ta = teamTotals(a, mode), tb = teamTotals(b, mode);
+  // Önce toplam güç eşitlenir; hücum/savunma dengesi (özellik başına ortalama fark) ikincil ölçüttür.
+  // Yoksa zayıf kaleyi güçlü forvetle telafi etmek "hücum farkı" diye cezalanır, dengesiz bölme seçilirdi.
+  // /10: 100'lük ölçekte de pozisyon cezası (1) ve kaleci cezası (100) aynı ağırlıkta kalır.
+  let c = (6 * Math.abs(ta.overall - tb.overall)
+    + Math.abs(ta.attack - tb.attack) / ATTACK.length
+    + Math.abs(ta.defense - tb.defense) / DEFENSE.length) / 10
     + positionGaps(a, format) + positionGaps(b, format);
-  if (keepers.size === 2 && a.filter(p => keepers.has(p.id)).length !== 1) c += 100;
+  // Sabit kalecide, kaleciyi tercih eden en az iki kişi varsa her takıma en az biri düşmeli.
+  if (mode === 'fixed' && naturalKeepers >= 2) {
+    const gkA = a.filter(p => p.positions.includes('GK')).length;
+    if (gkA === 0 || gkA === naturalKeepers) c += 100;
+  }
   return c;
 }
 
 // ponytail: tüm bölmeler denenir; 20 kişiye kadar anlık (C(20,10)/2 ≈ 92 bin). Daha kalabalık grup olursa yerel arama.
-function splitTeams(players, format, { together = [], apart = [] } = {}) {
+function splitTeams(players, format, { together = [], apart = [] } = {}, mode = 'fixed') {
   if (players.length < 2) return [];
   players = players.map(withDefaults);
   const n = players.length, k = Math.floor(n / 2);
-  const keepers = new Set([...players].sort(keeperOrder).slice(0, 2).map(p => p.id));
+  const naturalKeepers = players.filter(p => p.positions.includes('GK')).length;
   const results = [];
   for (const idx of combinations(n, k)) {
     if (n % 2 === 0 && idx[0] !== 0) continue; // eşit boyda her bölme iki kez çıkar; 0. oyuncu A'da olanı tut
@@ -396,7 +430,7 @@ function splitTeams(players, format, { together = [], apart = [] } = {}) {
     if (together.some(([x, y]) => inA.has(x) !== inA.has(y))) continue;
     if (apart.some(([x, y]) => inA.has(x) === inA.has(y))) continue;
     const a = players.filter(p => inA.has(p.id)), b = players.filter(p => !inA.has(p.id));
-    results.push({ a, b, cost: cost(a, b, format, keepers) });
+    results.push({ a, b, cost: cost(a, b, format, mode, naturalKeepers) });
   }
   return results.sort((x, y) => x.cost - y.cost);
 }
@@ -412,22 +446,26 @@ function balancedChoices(splits, slack, rand = Math.random) {
   return good;
 }
 
-function assignPositions(team, format) {
-  const left = team.map(withDefaults).sort(keeperOrder);
-  const out = left.length ? [{ id: left.shift().id, pos: 'GK' }] : [];
+// mode 'rotating': kale sırayla, kaleci yeri yok; o kişi orta sahaya eklenir.
+function assignPositions(team, format, mode = 'fixed') {
+  const left = team.map(withDefaults);
+  const out = [];
   const take = (p, pos) => { left.splice(left.indexOf(p), 1); out.push({ id: p.id, pos }); };
-  const slots = OUTFIELD.flatMap(pos => Array(FORMATIONS[format][pos]).fill(pos));
+  if (mode === 'fixed' && left.length) take(pickKeeper(left), 'GK');
+  const counts = { ...FORMATIONS[format] };
+  if (mode === 'rotating') counts.MID += 1;
+  const slots = OUTFIELD.flatMap(pos => Array(counts[pos] ?? 0).fill(pos));
   const open = [];
   // Önce tercihe göre: en az pozisyon seçmiş olan (en kısıtlı) öncelikli.
   for (const pos of slots) {
     const fans = left.filter(p => p.positions.includes(pos))
-      .sort((x, y) => x.positions.length - y.positions.length || y[BEST[pos]] - x[BEST[pos]]);
+      .sort((x, y) => x.positions.length - y.positions.length || FIT[pos](y) - FIT[pos](x));
     if (fans.length) take(fans[0], pos); else open.push(pos);
   }
-  // Kalan yerler: o pozisyonun özelliği en yüksek olan.
+  // Kalan yerler: o pozisyona en uygun olan.
   for (const pos of open) {
     if (!left.length) break;
-    take([...left].sort((x, y) => y[BEST[pos]] - x[BEST[pos]])[0], pos);
+    take([...left].sort((x, y) => FIT[pos](y) - FIT[pos](x))[0], pos);
   }
   return [...out, ...left.map(p => ({ id: p.id, pos: 'SUB' }))];
 }
@@ -495,21 +533,35 @@ function toScale100(d) {
   return d;
 }
 
+// Eski tek "Defans" pozisyonu: oyuncu stoper, sağ bek ve sol bek oynayabilir sayılır; dizilişlerde stoper olur.
+// Girdiyi yerinde değiştirir; tekrar çağrılması zararsız.
+function migratePositions(d) {
+  const fixLineup = l => { for (const s of [...(l?.a ?? []), ...(l?.b ?? [])]) if (s.pos === 'DEF') s.pos = 'CB'; };
+  for (const p of d.players ?? []) {
+    if (p.positions?.includes('DEF')) p.positions = [...new Set(p.positions.flatMap(x => (x === 'DEF' ? DEF_POS : [x])))];
+  }
+  fixLineup(d.match?.lineup);
+  for (const h of d.history ?? []) fixLineup(h.lineup);
+  return d;
+}
+
 if (typeof module !== 'undefined') {
   module.exports = { ATTACK, DEFENSE, ATTRS, FORMATIONS, withDefaults, overall, teamTotals, splitTeams, balancedChoices, assignPositions, swap,
-    applyResult, revertResult, standings, toScale100 };
+    applyResult, revertResult, standings, toScale100, pickKeeper, migratePositions, DEF_POS };
 }
 </script>
   <script>/* render.js */
 // Saf HTML/SVG üreticileri: FUT kartı, saha, skor tabelası, kadro listesi ve paylaşılabilir statik sayfa.
 // DOM kullanmaz. Tarayıcıda balance.js'ten sonra <script> ile, Node'da (paylas.js) require ile yüklenir.
-const SHORT = { GK: 'KL', DEF: 'DEF', MID: 'OS', FWD: 'FV', SUB: 'YDK' };
+const SHORT = { GK: 'KL', LB: 'SLB', CB: 'STP', RB: 'SĞB', DEF: 'DEF', MID: 'OS', FWD: 'FV', SUB: 'YDK' };
 const CARD_LABEL = { shot: 'ŞUT', pass: 'PAS', dribble: 'TOP', pace: 'HIZ', defense: 'SAV', physical: 'FİZ', goalkeeping: 'KAL' };
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => `&#${c.charCodeAt(0)};`);
 const ovr = p => overall(withDefaults(p));
 // Puanlar 100 üzerinden, FIFA gibi tam sayı gösterilir.
 const fmt = n => String(Math.round(n));
 // Maç sonuçlarından gelen form: ▲0.3 / ▼0.2
+// Kalede duran için gösterilen puan kalecilik puanıdır (takım gücü de öyle hesaplanır).
+const slotRating = (s, p) => (s.pos === 'GK' ? withDefaults(p).goalkeeping : ovr(p));
 const formTag = f => f
   ? `<span class="form-tag ${f > 0 ? 'up' : 'down'}" title="Maç sonuçlarından gelen form">${f > 0 ? '▲' : '▼'}${Math.round(Math.abs(f))}</span>`
   : '';
@@ -536,7 +588,8 @@ function card(p, attrs = '') {
 // ---------------- Saha çizimi ----------------
 const W = 360, H = 560;
 // Takımın kendi kalesinden uzaklık, saha yüksekliğine oranla. Kırmızı üst yarı, Mavi alt yarı.
-const ROW = { GK: 0.07, DEF: 0.185, MID: 0.305, FWD: 0.42 };
+// Satırlar ve satır içi sıra (seyirciye göre soldan sağa, Mavi takım için). Kırmızı karşıdan bakar: sırası ters.
+const ROWS = [[0.07, ['GK']], [0.185, ['LB', 'DEF', 'CB', 'RB']], [0.305, ['MID']], [0.42, ['FWD']]];
 const COLOR = { a: '#EF4B3F', b: '#3D7BFF' };
 const JERSEY = 'M-15,-15 L-6,-19 Q0,-14 6,-19 L15,-15 L22,-5 L14,-1 L14,18 L-14,18 L-14,-1 L-22,-5 Z';
 const FONT = `font-family="Big Shoulders Display, Arial Narrow, sans-serif"`;
@@ -547,17 +600,23 @@ function pitchSvg(lineup, byId, selected, title) {
   const marks = [];
   let i = 0;
   for (const t of ['a', 'b']) {
-    for (const pos of Object.keys(ROW)) {
-      const row = lineup[t].filter(s => s.pos === pos);
+    for (const [depth, group] of ROWS) {
+      const row = lineup[t].filter(s => group.includes(s.pos)).sort((x, y) => group.indexOf(x.pos) - group.indexOf(y.pos));
+      if (t === 'a') row.reverse();
+      const y = top + H * (t === 'a' ? depth : 1 - depth);
+      if (group[0] === 'GK' && !row.length && lineup.keeperMode === 'rotating') {
+        // Kale sırayla: boş forma çizgisi
+        marks.push(`<g transform="translate(${W / 2} ${y})"><path d="${JERSEY}" fill="none" stroke="${COLOR[t]}" stroke-width="2" stroke-dasharray="4 3"/>
+          <text y="36" text-anchor="middle" ${FONT} font-size="14" font-weight="800" fill="#EEF3E8" stroke="#0B2318" stroke-width="3.5" paint-order="stroke">Sırayla</text></g>`);
+      }
       row.forEach((s, k) => {
         const x = (W * (k + 1)) / (row.length + 1);
-        const y = top + H * (t === 'a' ? ROW[pos] : 1 - ROW[pos]);
         const p = byId.get(s.id);
         const sel = s.id === selected;
         marks.push(`<g class="pl" data-id="${esc(s.id)}" transform="translate(${x} ${y})"><g style="--i:${i++}">
           ${sel ? `<path d="${JERSEY}" fill="none" stroke="#FFE7A3" stroke-width="7" opacity=".6"/>` : ''}
           <path d="${JERSEY}" fill="${COLOR[t]}" stroke="${sel ? '#FFE7A3' : '#fff'}" stroke-width="${sel ? 2.5 : 1.5}" stroke-linejoin="round"/>
-          <text y="9" text-anchor="middle" ${FONT} font-size="17" font-weight="900" fill="#fff">${p ? fmt(ovr(p)) : '?'}</text>
+          <text y="9" text-anchor="middle" ${FONT} font-size="17" font-weight="900" fill="#fff">${p ? fmt(slotRating(s, p)) : '?'}</text>
           <text y="36" text-anchor="middle" ${FONT} font-size="15" font-weight="800" fill="#fff" stroke="#0B2318" stroke-width="3.5" paint-order="stroke">${p ? esc(p.name) : '?'}</text>
         </g></g>`);
       });
@@ -595,7 +654,8 @@ function pitchSvg(lineup, byId, selected, title) {
 
 // ---------------- Skor tabelası ve kadro listesi ----------------
 function scoreboard(lineup, byId) {
-  const tot = t => teamTotals(lineup[t].map(s => byId.get(s.id)).filter(Boolean));
+  const mode = lineup.keeperMode ?? 'fixed';
+  const tot = t => teamTotals(lineup[t].map(s => byId.get(s.id)).filter(Boolean), mode, lineup[t].find(s => s.pos === 'GK')?.id);
   const A = tot('a'), B = tot('b');
   const diff = fmt(Math.abs(A.overall - B.overall));
   const bar = (label, a, b) => `<div class="bar"><span class="label">${label}</span>
@@ -605,7 +665,7 @@ function scoreboard(lineup, byId) {
       <div class="sb-mid"><b>${diff}</b><span>fark</span></div>
       <div class="sb-team blue"><span class="sb-score">${fmt(B.overall)}</span><div><span class="sb-name">Mavi</span><small>${lineup.b.length} oyuncu</small></div></div>
     </div>
-    <div class="bars">${bar('Hücum', A.attack, B.attack)}${bar('Savunma', A.defense, B.defense)}</div>`;
+    <div class="bars">${bar('Hücum', A.attack, B.attack)}${bar('Savunma', A.defense, B.defense)}${bar(mode === 'fixed' ? 'Kaleci' : 'Kale (ortalama)', A.keeper, B.keeper)}</div>`;
   return { html, A, B, diff };
 }
 
@@ -615,7 +675,7 @@ function roster(lineup, t, byId, selected) {
     <ul>${lineup[t].map(s => {
       const p = byId.get(s.id);
       return `<li class="${s.pos === 'SUB' ? 'sub' : ''}"><button type="button" class="pl ${s.id === selected ? 'sel' : ''}" data-id="${esc(s.id)}">
-        <span class="tag">${SHORT[s.pos]}</span><span>${esc(p?.name ?? '?')}</span><span class="rt">${p ? fmt(ovr(p)) : ''}</span></button></li>`;
+        <span class="tag">${SHORT[s.pos]}</span><span>${esc(p?.name ?? '?')}</span><span class="rt" ${s.pos === 'GK' ? 'title="Kalecilik puanı"' : ''}>${p ? fmt(slotRating(s, p)) : ''}</span></button></li>`;
     }).join('')}</ul></div>`;
 }
 
@@ -728,7 +788,7 @@ const cloud = {
   <script>/* app.js */
 // Halı saha kadro kurucu: oyuncu kartları, dengeli takım, saha, puan durumu. Depolama aşağıda (bulut / claude.ai / yerel).
 const KEY = 'halisaha-kadro';
-const POS = { GK: 'Kaleci', DEF: 'Defans', MID: 'Orta saha', FWD: 'Forvet' };
+const POS = { GK: 'Kaleci', CB: 'Stoper', LB: 'Sol bek', RB: 'Sağ bek', MID: 'Orta saha', FWD: 'Forvet' };
 const LABEL = { shot: 'Şut', pass: 'Pas', dribble: 'Top sürme', pace: 'Hız', defense: 'Savunma', physical: 'Fizik', goalkeeping: 'Kalecilik' };
 const $ = id => document.getElementById(id);
 const main = $('main');
@@ -736,12 +796,12 @@ const newId = () => Date.now().toString(36) + Math.random().toString(36).slice(2
 
 // İlk açılışta örnek oyuncular (1–10 yazılıp ×10 ile 100'lük ölçeğe çevrilir): [ad, pozisyonlar, şut, pas, top sürme, hız, savunma, fizik, kalecilik]
 const SAMPLE = [
-  ['Mete', ['MID'], 6, 8, 6, 5, 6, 6, 4], ['Ali', ['DEF', 'GK'], 4, 5, 4, 5, 7, 7, 8],
-  ['Burak', ['FWD'], 9, 7, 8, 8, 3, 6, 2], ['Can', ['DEF', 'GK'], 3, 4, 3, 4, 6, 7, 7],
-  ['Deniz', ['MID'], 7, 8, 8, 7, 5, 5, 3], ['Emre', ['DEF'], 5, 6, 5, 6, 8, 8, 4],
+  ['Mete', ['MID'], 6, 8, 6, 5, 6, 6, 4], ['Ali', ['CB', 'GK'], 4, 5, 4, 5, 7, 7, 8],
+  ['Burak', ['FWD'], 9, 7, 8, 8, 3, 6, 2], ['Can', ['RB', 'GK'], 3, 4, 3, 4, 6, 7, 7],
+  ['Deniz', ['MID'], 7, 8, 8, 7, 5, 5, 3], ['Emre', ['CB'], 5, 6, 5, 6, 8, 8, 4],
   ['Furkan', ['FWD'], 8, 6, 7, 9, 4, 6, 3], ['Gökhan', ['MID'], 5, 6, 5, 5, 5, 6, 5],
-  ['Hakan', ['DEF'], 4, 5, 4, 4, 7, 8, 5], ['İlker', ['FWD'], 7, 5, 6, 7, 3, 5, 2],
-  ['Kerem', ['MID', 'FWD'], 6, 7, 7, 6, 6, 5, 4], ['Murat', ['DEF'], 3, 4, 3, 5, 6, 6, 6],
+  ['Hakan', ['LB'], 4, 5, 4, 4, 7, 8, 5], ['İlker', ['FWD'], 7, 5, 6, 7, 3, 5, 2],
+  ['Kerem', ['MID', 'FWD'], 6, 7, 7, 6, 6, 5, 4], ['Murat', ['RB', 'LB'], 3, 4, 3, 5, 6, 6, 6],
   ['Onur', ['FWD', 'MID'], 8, 7, 8, 8, 4, 6, 3],
 ];
 const fresh = () => ({
@@ -751,6 +811,8 @@ const fresh = () => ({
   scale: 100,  // puanlar 100 üzerinden
 });
 const history = () => (db.history ??= []); // eski verilerde geçmiş yok
+// Eski veriyi güncel biçime getirir: 1–10 → 100'lük ölçek, tek "Defans" → stoper/sağ bek/sol bek.
+const upgrade = d => migratePositions(toScale100(d));
 
 // Depolama, üç yoldan biri:
 //  - bulut (cloud.js doluysa): Supabase'te ortak veri; telefon ve bilgisayar aynı veriyi görür.
@@ -873,7 +935,7 @@ async function pull(force = false) {
 // Sunucu boşken ilk giren yönetici/düzenleyici, bu cihazdaki veriyle başlatır.
 async function seedCloud() {
   const local = loadLocal();
-  db = local ? toScale100(local) : fresh();
+  db = local ? upgrade(local) : fresh();
   save(false);
   await pushCloud();
   toast('Bu cihazdaki oyuncular ortak alana yüklendi.');
@@ -978,7 +1040,7 @@ async function boot() {
   if (useCloud) return bootCloud();
   if (!inArtifact) {
     const d = loadLocal();
-    db = d ? toScale100(d) : fresh(); // eski 10'luk veri bir kez çevrilir
+    db = d ? upgrade(d) : fresh(); // eski 10'luk veri bir kez çevrilir
     // Paylaşılan dosya: içindeki veri, bu cihazdaki son düzenlemeden yeniyse onu kullan.
     const seedEl = document.getElementById('kadro-seed');
     const seed = seedEl && parseBackup(seedEl.textContent);
@@ -991,12 +1053,12 @@ async function boot() {
   }
   main.innerHTML = '<p class="dim">Yükleniyor…</p>';
   const store = await window.claude.use('db');
-  if (!store) { const d = loadLocal(); db = d ? toScale100(d) : fresh(); return render(); } // oturum kapalı: bu cihazda sakla
+  if (!store) { const d = loadLocal(); db = d ? upgrade(d) : fresh(); return render(); } // oturum kapalı: bu cihazda sakla
   remote = store.doc('kadro/state');
   remote.onSnapshot(snap => {
     if (snap.metadata.hasPendingWrites) return; // kendi yazmamızın yankısı
     if (!snap.exists) { if (!db) { needsSetup = true; render(); } return; }
-    const data = toScale100(structuredClone(snap.data()));
+    const data = upgrade(structuredClone(snap.data()));
     if (db && JSON.stringify(data) === JSON.stringify(db)) return;
     db = data;
     needsSetup = false;
@@ -1176,7 +1238,7 @@ async function sharePng(svg, filename) {
 }
 
 // ---------------- Maç ----------------
-// Rastgelelik payı: en iyi bölmenin maliyetine bu kadar yakın olanlar "dengeli" sayılır (≈ en fazla 1 genel puan fark).
+// Rastgelelik payı: en iyi bölmenin maliyetine bu kadar yakın olanlar "dengeli" sayılır (≈ en fazla 5 puan takım gücü farkı).
 const SLACK = 3;
 let splits = [], si = 0, selected = null, note = '', enter = false;
 
@@ -1213,6 +1275,16 @@ function matchView() {
         </form>
         <ul class="locks" id="locks"></ul>
       </section>
+      <section>
+        <h2>Kaleci</h2>
+        <div class="segmented two" role="radiogroup" aria-label="Kaleci">
+          <label><input type="radio" name="keeper" value="fixed" ${(m.keeperMode ?? 'fixed') === 'fixed' ? 'checked' : ''}><span>Sabit</span></label>
+          <label><input type="radio" name="keeper" value="rotating" ${m.keeperMode === 'rotating' ? 'checked' : ''}><span>Değişkenli</span></label>
+        </div>
+        <p class="hint">${(m.keeperMode ?? 'fixed') === 'fixed'
+          ? 'Sabit: kalede tek kişi. Kaleci kalecilik puanıyla sayılır; kaleci yoksa defanslardan seçilir.'
+          : 'Değişkenli: kaleye sırayla geçilir. Takımın kalecilik ortalaması alınır.'}</p>
+      </section>
       <button class="btn big" id="build">Takımları kur</button>
     </aside>
     <section class="stage" id="result"></section>
@@ -1248,6 +1320,7 @@ function matchView() {
   $('all').onclick = () => setAll(true);
   $('none').onclick = () => setAll(false);
   main.querySelectorAll('[name=format]').forEach(r => { r.onchange = () => { m.format = r.value; saveMatch(); count(); }; });
+  main.querySelectorAll('[name=keeper]').forEach(r => { r.onchange = () => { m.keeperMode = r.value; saveMatch(); matchView(); }; });
   $('lock').onsubmit = e => {
     e.preventDefault();
     const fd = new FormData(e.target);
@@ -1268,7 +1341,8 @@ function build() {
   // Gelmeyen oyuncuyu içeren kilit yok sayılır.
   const here = l => l.every(id => m.coming.includes(id));
   // En dengeliye yakın bölmeler karışık sırayla: her kurulumda farklı takımlar.
-  splits = balancedChoices(splitTeams(coming, m.format, { together: m.locks.together.filter(here), apart: m.locks.apart.filter(here) }), SLACK);
+  splits = balancedChoices(splitTeams(coming, m.format, { together: m.locks.together.filter(here), apart: m.locks.apart.filter(here) },
+    m.keeperMode ?? 'fixed'), SLACK);
   si = 0;
   note = coming.length < 2 ? 'Takım kurmak için en az 2 kişi seç.' : splits.length ? '' : 'Bu kilitlerle dengeli bölme yok. Bir kilidi kaldırıp tekrar dene.';
   pick();
@@ -1276,7 +1350,8 @@ function build() {
 
 function pick() {
   const m = db.match, s = splits[si];
-  m.lineup = s ? { a: assignPositions(s.a, m.format), b: assignPositions(s.b, m.format) } : null;
+  const mode = m.keeperMode ?? 'fixed';
+  m.lineup = s ? { a: assignPositions(s.a, m.format, mode), b: assignPositions(s.b, m.format, mode), keeperMode: mode } : null;
   m.resultId = null; // yeni kadro: sonucu henüz girilmedi
   selected = null;
   enter = true;
@@ -1425,7 +1500,7 @@ function standingsView() {
 // Yedek dosyasını doğrular; geçersizse null. Kadro, oyuncuları hâlâ varsa korunur.
 function parseBackup(text) {
   let d;
-  try { d = toScale100(JSON.parse(text)); } catch { return null; }
+  try { d = upgrade(JSON.parse(text)); } catch { return null; }
   const ok = Array.isArray(d?.players) && d.players.every(p =>
     p && typeof p.id === 'string' && typeof p.name === 'string' && Array.isArray(p.positions)
     && ATTRS.every(k => Number.isInteger(p[k]) && p[k] >= 1 && p[k] <= 100));
