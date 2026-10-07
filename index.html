@@ -312,6 +312,20 @@ main { padding: 28px clamp(16px, 4vw, 40px) 64px; max-width: 1280px; margin: 0 a
 .m-teams { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; font-size: .8rem; color: var(--chalk-dim); }
 .m-teams span:last-child { text-align: right; }
 
+/* ---------- Goller ---------- */
+.goals { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; margin: 12px 0; }
+@media (max-width: 600px) { .goals { grid-template-columns: minmax(0, 1fr); } }
+.goals-col { background: var(--turf-1); border: 1px solid var(--turf-2); border-top: 3px solid var(--red); border-radius: 14px; padding: 12px 14px; }
+.goals-col.b { border-top-color: var(--blue); }
+.goals-head { display: flex; justify-content: space-between; gap: 8px; margin-bottom: 6px; }
+.goals-col ol { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
+.goals-col li { display: grid; grid-template-columns: 2.6em 1fr auto; align-items: center; gap: 8px; font-variant-numeric: tabular-nums; }
+.g-min { color: var(--chalk-dim); text-align: right; }
+.goals-col p { margin: 0; }
+.goal-form { display: flex; flex-wrap: wrap; gap: 10px; align-items: end; margin: 4px 0 18px; }
+.goal-form label { display: grid; gap: 4px; font-size: .85rem; color: var(--chalk-dim); }
+.goal-form input { width: 8em; }
+
 /* ---------- Maç analizi (video) ---------- */
 .an-teams { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; margin: 14px 0 20px; }
 .an-teams:has(.an-one) { grid-template-columns: minmax(0, 1fr); max-width: 720px; }
@@ -340,6 +354,7 @@ main { padding: 28px clamp(16px, 4vw, 40px) 64px; max-width: 1280px; margin: 0 a
 .mc-stats { display: grid; grid-template-columns: 1fr 1fr; gap: 2px 14px; font-size: .78rem; font-weight: 500; letter-spacing: .04em; font-variant-numeric: tabular-nums; text-align: left; }
 .mc-stats b { display: inline-block; min-width: 1.6em; text-align: right; font-size: 1.05rem; font-weight: 700; letter-spacing: 0; }
 .mc-foot { font-size: .7rem; opacity: .8; }
+.mc-ga { font-weight: 700; font-size: .85rem; background: rgb(0 0 0 / .14); border-radius: 999px; padding: 1px 10px; }
 .mc-legend { display: grid; grid-template-columns: auto 1fr; gap: 4px 12px; margin: 22px 0 0; font-size: .85rem; color: var(--chalk-dim); max-width: 70ch; }
 .mc-legend dt { font-weight: 700; color: var(--chalk); } .mc-legend dd { margin: 0; }
 @media (prefers-reduced-motion: reduce) { .mc, .mc:hover { transition: none; transform: none; } }
@@ -543,8 +558,12 @@ function revertResult(players, deltas) {
 // Puan durumu: galibiyet 3, beraberlik 1. Sıra: puan, galibiyet yüzdesi, oynanan maç, ad.
 function standings(players, history) {
   const rows = new Map(players.map(p => [p.id,
-    { id: p.id, name: p.name, played: 0, won: 0, drawn: 0, lost: 0, points: 0, form: p.form ?? 0 }]));
+    { id: p.id, name: p.name, played: 0, won: 0, drawn: 0, lost: 0, points: 0, form: p.form ?? 0, goals: 0, assists: 0 }]));
   for (const h of history) {
+    for (const g of h.goals ?? []) {
+      if (rows.has(g.by)) rows.get(g.by).goals++;
+      if (rows.has(g.assist)) rows.get(g.assist).assists++;
+    }
     for (const [ids, mine, theirs] of [[h.a, h.scoreA, h.scoreB], [h.b, h.scoreB, h.scoreA]]) {
       for (const id of ids) {
         const r = rows.get(id);
@@ -557,6 +576,21 @@ function standings(players, history) {
   return [...rows.values()]
     .map(r => ({ ...r, winPct: r.played ? Math.round((100 * r.won) / r.played) : 0 }))
     .sort((x, y) => y.points - x.points || y.winPct - x.winPct || y.played - x.played || x.name.localeCompare(y.name, 'tr'));
+}
+
+// Bir maçın gol listesinden geçerli olanlar: atan maçta oynamış, asist (varsa) aynı takımdan başka biri, dakika 0–120 ya da boş.
+// Takım başına en fazla skoru kadar gol (fazlası atılır).
+function cleanGoals(h) {
+  const side = id => (h.a.includes(id) ? 'a' : h.b.includes(id) ? 'b' : null);
+  const left = { a: h.scoreA, b: h.scoreB };
+  return (Array.isArray(h.goals) ? h.goals : []).filter(g => {
+    const t = g && side(g.by);
+    if (!t || left[t] <= 0) return false;
+    if (g.assist != null && (side(g.assist) !== t || g.assist === g.by)) return false;
+    if (g.min != null && !(Number.isInteger(g.min) && g.min >= 0 && g.min <= 120)) return false;
+    left[t]--;
+    return true;
+  }).map(g => ({ by: g.by, assist: g.assist ?? null, min: g.min ?? null }));
 }
 
 // Eski (1–10) veriyi bir kez 100'lük ölçeğe çevirir; scale: 100 işaretli veriye dokunmaz. Girdiyi yerinde değiştirir.
@@ -605,6 +639,15 @@ function describeChanges(prev, next) {
   const ph = prev?.history ?? [], nh = next?.history ?? [];
   for (const h of nh) if (!ph.some(x => x.id === h.id)) out.push(`Maç sonucu: Kırmızı ${h.scoreA}–${h.scoreB} Mavi`);
   for (const h of ph) if (!nh.some(x => x.id === h.id)) out.push(`Maç silindi (${h.scoreA}–${h.scoreB})`);
+  const names = new Map([...(prev?.players ?? []), ...(next?.players ?? [])].map(p => [p.id, p.name]));
+  const goalText = g => `${names.get(g.by) ?? '?'}${g.assist ? ` (asist ${names.get(g.assist) ?? '?'})` : ''}${g.min != null ? ` ${g.min}'` : ''}`;
+  for (const h of nh) {
+    const o = ph.find(x => x.id === h.id);
+    if (!o) continue;
+    const was = (o.goals ?? []).map(goalText), now = (h.goals ?? []).map(goalText);
+    for (const t of now) if (!was.includes(t)) out.push(`Gol eklendi: ${t}`);
+    for (const t of was) if (!now.includes(t)) out.push(`Gol silindi: ${t}`);
+  }
   const lineupKey = m => JSON.stringify([m?.lineup?.a, m?.lineup?.b, m?.lineup?.keeperMode]);
   if (next?.match?.lineup && lineupKey(prev?.match) !== lineupKey(next.match)) {
     const l = next.match.lineup;
@@ -615,7 +658,7 @@ function describeChanges(prev, next) {
 
 if (typeof module !== 'undefined') {
   module.exports = { ATTACK, DEFENSE, ATTRS, FORMATIONS, withDefaults, overall, teamTotals, splitTeams, balancedChoices, assignPositions, swap,
-    applyResult, revertResult, standings, toScale100, pickKeeper, migratePositions, DEF_POS, describeChanges };
+    applyResult, revertResult, standings, toScale100, pickKeeper, migratePositions, DEF_POS, describeChanges, cleanGoals };
 }
 </script>
   <script>/* render.js */
@@ -751,10 +794,10 @@ function roster(lineup, t, byId, selected) {
 function standingsTable(rows) {
   if (!rows.some(r => r.played)) return '<div class="empty">Henüz maç sonucu yok. Maç ekranında sonucu kaydedince tablo dolar.</div>';
   return `<div class="table-wrap"><table class="standings">
-    <thead><tr><th>#</th><th class="l">Oyuncu</th><th title="Oynadığı maç">O</th><th title="Galibiyet">G</th><th title="Beraberlik">B</th><th title="Mağlubiyet">M</th><th title="Galibiyet yüzdesi">%</th><th>Form</th><th>Puan</th></tr></thead>
+    <thead><tr><th>#</th><th class="l">Oyuncu</th><th title="Oynadığı maç">O</th><th title="Galibiyet">G</th><th title="Beraberlik">B</th><th title="Mağlubiyet">M</th><th title="Galibiyet yüzdesi">%</th><th title="Gol">Gol</th><th title="Asist">Ast</th><th>Form</th><th>Puan</th></tr></thead>
     <tbody>${rows.map((r, i) => `<tr class="${r.played ? '' : 'idle'}">
       <td>${i + 1}</td><td class="l">${esc(r.name)}</td><td>${r.played}</td><td>${r.won}</td><td>${r.drawn}</td><td>${r.lost}</td>
-      <td>${r.played ? r.winPct : '–'}</td><td>${formTag(r.form) || '<span class="dim">–</span>'}</td><td class="pts">${r.points}</td></tr>`).join('')}</tbody>
+      <td>${r.played ? r.winPct : '–'}</td><td>${r.goals || '<span class="dim">–</span>'}</td><td>${r.assists || '<span class="dim">–</span>'}</td><td>${formTag(r.form) || '<span class="dim">–</span>'}</td><td class="pts">${r.points}</td></tr>`).join('')}</tbody>
   </table></div>`;
 }
 
@@ -823,6 +866,30 @@ function staticPage(d, css) {
 `;
 }
 
+// Goller: iki sütun (Kırmızı / Mavi), dakikaya göre. editable: silme düğmeleri ve gol ekleme formu.
+function goalsHtml(h, byId, editable) {
+  const ad = id => esc(byId.get(id)?.name ?? '?');
+  const goller = (h.goals ?? []).map((g, i) => ({ ...g, i }));
+  const sutun = (t, ids, skor) => {
+    const gs = goller.filter(g => ids.includes(g.by)).sort((x, y) => (x.min ?? 999) - (y.min ?? 999));
+    return `<div class="goals-col ${t}"><div class="goals-head"><b>${TEAM_NAME[t]}</b><span class="dim">${gs.length}/${skor} gol girildi</span></div>
+      ${gs.length ? `<ol>${gs.map(g => `<li><span class="g-min">${g.min != null ? `${g.min}'` : ''}</span><span><b>${ad(g.by)}</b>${g.assist ? ` <span class="dim">asist ${ad(g.assist)}</span>` : ''}</span>
+        ${editable ? `<button class="btn quiet small" data-gol-sil="${g.i}" aria-label="${ad(g.by)} golünü sil">Sil</button>` : ''}</li>`).join('')}</ol>`
+        : '<p class="dim">Henüz girilmedi.</p>'}</div>`;
+  };
+  const dolu = goller.length >= h.scoreA + h.scoreB;
+  const secenek = ids => ids.map(id => `<option value="${esc(id)}">${ad(id)}</option>`).join('');
+  const form = editable && !dolu ? `<form class="goal-form" id="gol-form">
+      <label>Golü atan<select class="input" name="by" required><optgroup label="Kırmızı">${secenek(h.a)}</optgroup><optgroup label="Mavi">${secenek(h.b)}</optgroup></select></label>
+      <label>Asist<select class="input" name="assist"></select></label>
+      <label>Dakika<input class="input" name="min" type="number" min="0" max="120" inputmode="numeric" placeholder="örn. 23"></label>
+      <button class="btn">Gol ekle</button>
+    </form>` : '';
+  if (!goller.length && !editable) return '';
+  return `<h2 class="sub-h">Goller ve asistler</h2>
+    <div class="goals">${sutun('a', h.a, h.scoreA)}${sutun('b', h.b, h.scoreB)}</div>${form}`;
+}
+
 // Maç analizi (video): analiz/<maç kaydı id>/analiz.json; iki kameradan ölçülen koşu verisi ve FIFA tarzı kartlar.
 const TEAM_NAME = { a: 'Kırmızı', b: 'Mavi' };
 const MEVKI = { KL: 'Kaleci', DEF: 'Defans', OS: 'Orta saha', FV: 'Forvet' };
@@ -835,12 +902,16 @@ function analysisPlayerHtml(o, base) {
     <figcaption><b>${esc(o.ad)}</b> <span class="dim">${TEAM_NAME[o.taraf]}, ${MEVKI[o.mevki]} · ${o.km.toFixed(1)} km · ${o.kmh} km/s</span>
     <button class="btn quiet" data-an-teams>Takımları göster</button></figcaption></figure>`;
 }
-function analysisHtml(a, base) {
+function analysisHtml(a, base, goals = []) {
+  const sayi = id => {
+    const g = goals.filter(x => x.by === id).length, as = goals.filter(x => x.assist === id).length;
+    return g || as ? `<span class="mc-ga">${[g && `${g} gol`, as && `${as} asist`].filter(Boolean).join(' · ')}</span>` : '';
+  };
   const kart = (o, i) => `<button class="mc ${o.seviye}" data-an="${i}" aria-pressed="false" aria-label="${esc(o.ad)}, genel ${o.genel}, ${MEVKI[o.mevki]}: ısı haritasını göster">
       <span class="mc-top"><span class="mc-ovr"><b>${o.genel}</b><span>${o.mevki}</span></span><span class="mc-team ${o.taraf}">${TEAM_NAME[o.taraf]}</span></span>
       <span class="mc-name">${esc(o.ad)}</span>
       <span class="mc-stats">${Object.entries(o.s).map(([k, v]) => `<span><b>${v}</b> ${k}</span>`).join('')}</span>
-      <span class="mc-foot">${o.km.toFixed(1)} km · ${o.kmh} km/s${o.az ? ' · az görüntü' : ''}</span>
+      ${sayi(o.id)}<span class="mc-foot">${o.km.toFixed(1)} km · ${o.kmh} km/s${o.az ? ' · az görüntü' : ''}</span>
     </button>`;
   return `<h2 class="sub-h">Maç analizi</h2>
     <p class="hint">İki kameradan otomatik ölçüldü: ${Math.round(a.mac_dk)} dakika, devre arası ${Math.round(a.devre_arasi_dk)}. dakikada. Isı haritalarında takımın kendi kalesi hep solda. Bir karta bas: o oyuncunun ısı haritası görünür. Pas, şut ve top tekniği ölçülmedi.</p>
@@ -854,7 +925,7 @@ function analysisHtml(a, base) {
     </dl>`;
 }
 
-if (typeof module !== 'undefined') module.exports = { card, pitchSvg, scoreboard, roster, standingsTable, historyList, staticSections, staticPage, analysisHtml, analysisTeamsHtml, analysisPlayerHtml };
+if (typeof module !== 'undefined') module.exports = { card, pitchSvg, scoreboard, roster, standingsTable, historyList, staticSections, staticPage, analysisHtml, analysisTeamsHtml, analysisPlayerHtml, goalsHtml };
 </script>
   <script>/* cloud.js */
 // Supabase ortak veri bağlantısı. URL ve anahtar boşsa uygulama bu cihazda (localStorage) çalışır.
@@ -1578,13 +1649,15 @@ function lastMatchView() {
         <div class="teams">${roster(lineup, 'a', byId)}${roster(lineup, 'b', byId)}</div>
       </div>
     </section>
+    <section id="goller"></section>
     <section id="analiz"></section>`;
+  drawGoals(h, byId);
   // Video analizi varsa (siteyle yayınlanan analiz/<maç id>/analiz.json) altına ekle; yoksa sessizce yok.
   const base = `analiz/${h.id}`;
   fetch(`${base}/analiz.json`).then(r => r.ok ? r.json() : null).then(a => {
     const yer = $('analiz');
     if (!a || !yer) return;
-    yer.innerHTML = analysisHtml(a, base);
+    yer.innerHTML = analysisHtml(a, base, h.goals ?? []);
     const panel = $('an-panel');
     const sec = i => {
       yer.querySelectorAll('.mc').forEach(k => k.setAttribute('aria-pressed', String(k.dataset.an === String(i))));
@@ -1600,6 +1673,43 @@ function lastMatchView() {
   $('png').onclick = () => sharePng(
     pitchSvg(lineup, byId, null, { a: String(h.scoreA), b: String(h.scoreB), mid: verdict, date: new Date(h.date).toLocaleDateString('tr-TR', { day: 'numeric', month: 'long' }) }),
     `mac-${h.date.slice(0, 10)}.png`);
+}
+
+// Goller: herkes görür; yönetici/düzenleyici ekler ve siler (maç kaydının içinde, h.goals).
+function drawGoals(h, byId) {
+  const yer = $('goller');
+  if (!yer) return;
+  yer.innerHTML = goalsHtml(h, byId, !READONLY);
+  if (READONLY) return;
+  const f = $('gol-form');
+  const atan = f?.elements.by, asist = f?.elements.assist;
+  const asistler = () => {
+    const takim = h.a.includes(atan.value) ? h.a : h.b;
+    asist.innerHTML = '<option value="">Asist yok</option>' + takim.filter(id => id !== atan.value)
+      .map(id => `<option value="${esc(id)}">${esc(byId.get(id)?.name ?? '?')}</option>`).join('');
+  };
+  if (f) {
+    atan.onchange = asistler;
+    asistler();
+    f.onsubmit = e => {
+      e.preventDefault();
+      const dk = f.elements.min.value === '' ? null : Number(f.elements.min.value);
+      const yeni = [...(h.goals ?? []), { by: atan.value, assist: asist.value || null, min: dk }];
+      const temiz = cleanGoals({ ...h, goals: yeni });
+      if (temiz.length < yeni.length) return toast(`${h.a.includes(atan.value) ? 'Kırmızı' : 'Mavi'} takımın tüm golleri zaten girildi ya da dakika geçersiz (0–120).`);
+      h.goals = temiz;
+      save();
+      toast(`Gol eklendi: ${byId.get(atan.value)?.name ?? '?'}`);
+      lastMatchView(); // analiz kartlarındaki gol/asist sayıları da yenilensin
+    };
+  }
+  yer.querySelectorAll('[data-gol-sil]').forEach(b => b.onclick = async () => {
+    const g = h.goals[Number(b.dataset.golSil)];
+    if (!(await ask(`${byId.get(g.by)?.name ?? '?'} golü silinsin mi?`, 'Sil', true))) return;
+    h.goals = h.goals.filter(x => x !== g);
+    save();
+    lastMatchView();
+  });
 }
 
 // ---------------- Puan durumu ----------------
@@ -1644,7 +1754,7 @@ function parseBackup(text) {
   for (const p of d.players) if (!(Number.isFinite(p.form) && Math.abs(p.form) <= 10)) delete p.form;
   const history = Array.isArray(d.history) ? d.history.filter(h =>
     h && typeof h.id === 'string' && Array.isArray(h.a) && Array.isArray(h.b)
-    && Number.isInteger(h.scoreA) && Number.isInteger(h.scoreB)) : [];
+    && Number.isInteger(h.scoreA) && Number.isInteger(h.scoreB)).map(h => (h.goals ? { ...h, goals: cleanGoals(h) } : h)) : [];
   if (!history.some(h => h.id === m.resultId)) m.resultId = null;
   return { players: d.players, match: m, history, scale: 100, ...(typeof d.savedAt === 'string' ? { savedAt: d.savedAt } : {}) };
 }
