@@ -234,6 +234,12 @@ main { padding: 28px clamp(16px, 4vw, 40px) 64px; max-width: 1280px; margin: 0 a
 }
 @media (max-width: 560px) { .draft-bar { top: 8px; } }
 
+/* ---------- Değişiklik kaydı ---------- */
+.changes { list-style: none; padding: 0; margin: 0; display: grid; gap: 8px; max-width: 760px; }
+.changes li { padding: 10px 14px; border-radius: 12px; background: var(--turf-1); border: 1px solid var(--turf-2); display: grid; gap: 4px; }
+.c-top { font-size: .9rem; }
+.c-text { font-size: .9rem; color: var(--chalk); overflow-wrap: anywhere; }
+
 /* ---------- Giriş durumu ---------- */
 .who { display: flex; align-items: center; gap: 8px; font-size: .85rem; }
 .tabs a[hidden] { display: none; }
@@ -545,9 +551,39 @@ function migratePositions(d) {
   return d;
 }
 
+// ---------------- Değişiklik özeti ----------------
+// Yöneticinin "Son değişiklikler" listesinde görünen kısa açıklamalar. Saf: iki veri halini karşılaştırır.
+const ATTR_TR = { shot: 'Şut', pass: 'Pas', dribble: 'Top sürme', pace: 'Hız', defense: 'Savunma', physical: 'Fizik', goalkeeping: 'Kalecilik' };
+const POS_TR = { GK: 'Kaleci', CB: 'Stoper', LB: 'Sol bek', RB: 'Sağ bek', DEF: 'Defans', MID: 'Orta saha', FWD: 'Forvet' };
+
+function describeChanges(prev, next) {
+  const out = [];
+  const before = new Map((prev?.players ?? []).map(p => [p.id, p]));
+  const after = new Set((next?.players ?? []).map(p => p.id));
+  const posText = p => (p.positions ?? []).map(x => POS_TR[x] ?? x).join(', ') || '—';
+  for (const p of next?.players ?? []) {
+    const o = before.get(p.id);
+    if (!o) { out.push(`${p.name} eklendi`); continue; }
+    if (o.name !== p.name) out.push(`${o.name} → ${p.name} (ad)`);
+    const attrs = ATTRS.filter(k => o[k] !== p[k]).map(k => `${ATTR_TR[k]} ${o[k]}→${p[k]}`);
+    if (attrs.length) out.push(`${p.name}: ${attrs.join(', ')}`);
+    if (posText(o) !== posText(p)) out.push(`${p.name}: pozisyon ${posText(o)} → ${posText(p)}`);
+  }
+  for (const o of prev?.players ?? []) if (!after.has(o.id)) out.push(`${o.name} silindi`);
+  const ph = prev?.history ?? [], nh = next?.history ?? [];
+  for (const h of nh) if (!ph.some(x => x.id === h.id)) out.push(`Maç sonucu: Kırmızı ${h.scoreA}–${h.scoreB} Mavi`);
+  for (const h of ph) if (!nh.some(x => x.id === h.id)) out.push(`Maç silindi (${h.scoreA}–${h.scoreB})`);
+  const lineupKey = m => JSON.stringify([m?.lineup?.a, m?.lineup?.b, m?.lineup?.keeperMode]);
+  if (next?.match?.lineup && lineupKey(prev?.match) !== lineupKey(next.match)) {
+    const l = next.match.lineup;
+    out.push(`Kadro kaydedildi (${next.match.format}, ${l.keeperMode === 'rotating' ? 'değişkenli' : 'sabit'} kaleci)`);
+  }
+  return out;
+}
+
 if (typeof module !== 'undefined') {
   module.exports = { ATTACK, DEFENSE, ATTRS, FORMATIONS, withDefaults, overall, teamTotals, splitTeams, balancedChoices, assignPositions, swap,
-    applyResult, revertResult, standings, toScale100, pickKeeper, migratePositions, DEF_POS };
+    applyResult, revertResult, standings, toScale100, pickKeeper, migratePositions, DEF_POS, describeChanges };
 }
 </script>
   <script>/* render.js */
@@ -771,7 +807,7 @@ async function cloudFetch(path, body) {
   if (CLOUD_KEY.startsWith('eyJ')) headers.Authorization = `Bearer ${CLOUD_KEY}`; // eski tip (JWT) anon anahtar
   const res = await fetch(`${CLOUD_URL}/rest/v1/${path}`,
     body === undefined ? { headers, cache: 'no-store' } : { method: 'POST', headers, body: JSON.stringify(body) });
-  if (!res.ok) throw new Error(`Sunucu hatası (${res.status})`);
+  if (!res.ok) throw Object.assign(new Error(`Sunucu hatası (${res.status})`), { status: res.status });
   return res.json();
 }
 
@@ -866,6 +902,7 @@ function save(touch = true) {
 let cloudVersion = 0, cloudSaving = false, cloudDirty = false;
 // Kadro taslağı (bulutta): Maç ekranındaki değişiklikler "Kadroyu kaydet"e basılana kadar sadece bu cihazda.
 let matchDirty = false;
+let lastServer = null; // sunucudan son okunan / sunucuya son yazılan veri (değişiklik özeti için)
 let matchBase = null; // sunucudaki kayıtlı kadro (JSON), taslağın üstüne başkası kaydetti mi diye bakmak için
 // Alan sırasından bağımsız JSON: veritabanı (jsonb) alanların sırasını değiştirir, karşılaştırma buna takılmasın.
 const canon = v => JSON.stringify(v, (k, x) => (x && typeof x === 'object' && !Array.isArray(x)
@@ -884,7 +921,7 @@ async function publishMatch() {
   const server = r.state && parseBackup(JSON.stringify(r.state));
   if (server && matchBase !== null && canon(server.match) !== matchBase
       && !(await ask('Sen düzenlerken başka biri kadroyu kaydetti. Onunkinin yerine seninki kaydedilsin mi?', 'Benimkini kaydet'))) return;
-  if (server) { server.match = db.match; db = server; } // başkalarının oyuncu/sonuç değişiklikleri korunur
+  if (server) { lastServer = structuredClone(server); server.match = db.match; db = server; } // başkalarının oyuncu/sonuç değişiklikleri korunur
   cloudVersion = r.version;
   matchDirty = false;
   save();
@@ -923,6 +960,7 @@ async function pull(force = false) {
   cloudVersion = r.version;
   const d = r.state && parseBackup(JSON.stringify(r.state));
   if (d) {
+    lastServer = structuredClone(d);
     if (matchDirty) d.match = db.match; // kaydedilmemiş kadro taslağı ezilmesin
     else matchBase = canon(d.match);
     db = d;
@@ -949,8 +987,16 @@ async function pushCloud() {
     const state = JSON.parse(JSON.stringify(db));
     delete state.editedAt;
     if (matchDirty && matchBase) state.match = JSON.parse(matchBase); // taslak kadro başkalarına sızmasın
+    const summary = lastServer ? describeChanges(lastServer, state).join('; ') : 'Veriler ortak alana yüklendi';
+    const args = { p_code: storedCode(), p_state: state, p_version: cloudVersion, p_summary: summary || 'Değişiklik' };
     let r;
-    try { r = await cloud.rpc('save_state', { p_code: storedCode(), p_state: state, p_version: cloudVersion }); }
+    try {
+      r = await cloud.rpc('save_state', args).catch(e => {
+        // Sunucuya değişiklik kaydı güncellemesi (bulut-guncelleme-1.sql) henüz kurulmadıysa özetsiz kaydet
+        if (e.status === 404) { delete args.p_summary; return cloud.rpc('save_state', args); }
+        throw e;
+      });
+    }
     catch {
       cloudDirty = true;
       toast('Kaydedilemedi: internet yok. Bağlantı gelince tekrar denenecek.');
@@ -959,6 +1005,7 @@ async function pushCloud() {
     }
     if (r.ok) {
       cloudVersion = r.version;
+      lastServer = parseBackup(JSON.stringify(state));
       // Sunucuya giden halin, pull'da okunacak biçimdeki kadrosu (karşılaştırma aynı biçimde olsun)
       matchBase = canon(parseBackup(JSON.stringify(state))?.match ?? null);
       continue;
@@ -1575,7 +1622,10 @@ function setupView() {
 async function membersView() {
   if (role !== 'admin') { location.hash = 'oyuncular'; return; }
   main.innerHTML = '<p class="dim">Yükleniyor…</p>';
-  const r = await cloud.rpc('members_list', { p_code: storedCode() }).catch(() => null);
+  const [r, log] = await Promise.all([
+    cloud.rpc('members_list', { p_code: storedCode() }).catch(() => null),
+    cloud.rpc('change_log_list', { p_code: storedCode() }).catch(() => null),
+  ]);
   if (!r?.ok) { main.innerHTML = '<div class="empty">Yetki listesi alınamadı. İnternet bağlantını kontrol edip sayfayı yenile.</div>'; return; }
   main.innerHTML = `<div class="head"><div><h1>Yetkiler</h1>
       <p>Linki bilen herkes görüntüler. Kodu olan düzenleyiciler her şeyi değiştirebilir; kod vermek sadece yöneticide.</p></div></div>
@@ -1592,7 +1642,15 @@ async function membersView() {
         <td class="pts">${esc(m.code)}</td>
         <td>${m.me ? '<span class="dim">sen</span>' : `<button class="btn quiet small" data-rm="${esc(m.id)}" data-name="${esc(m.name)}">Kodu iptal et</button>`}</td>
       </tr>`).join('')}</tbody>
-    </table></div>`;
+    </table></div>
+    <h2 class="sub-h">Son değişiklikler</h2>
+    ${!log?.ok ? '<div class="empty">Değişiklik kaydı henüz kurulmamış ya da alınamadı.</div>'
+      : !log.log.length ? '<div class="empty">Henüz kayıtlı değişiklik yok.</div>'
+      : `<ul class="changes">${log.log.map(c => `<li>
+          <div class="c-top"><b>${esc(c.member)}</b> <span class="dim">${c.role === 'admin' ? 'yönetici' : 'düzenleyici'},
+            ${new Date(c.at).toLocaleString('tr-TR', { day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' })}</span></div>
+          <div class="c-text">${c.summary.split('; ').map(esc).join('<br>')}</div>
+        </li>`).join('')}</ul>`}`;
   $('add-member').onsubmit = async e => {
     e.preventDefault();
     const f = e.target;
