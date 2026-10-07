@@ -51,7 +51,9 @@ h2 { font-size: 1.35rem; }
   border-bottom: 1px solid var(--turf-2);
 }
 .brand { font-family: var(--display); font-weight: 900; font-size: 1.6rem; color: var(--chalk); text-decoration: none; letter-spacing: .02em; }
-.tabs { display: flex; gap: 4px; background: var(--turf-1); padding: 4px; border-radius: 999px; border: 1px solid var(--turf-2); }
+.tabs { display: flex; gap: 4px; background: var(--turf-1); padding: 4px; border-radius: 999px; border: 1px solid var(--turf-2); max-width: 100%; overflow-x: auto; scrollbar-width: none; }
+.tabs::-webkit-scrollbar { display: none; }
+.pager { display: inline-flex; align-items: center; gap: 8px; }
 .tabs a { padding: 6px 16px; border-radius: 999px; color: var(--chalk-dim); text-decoration: none; font-weight: 500; white-space: nowrap; }
 .tabs a.active { background: var(--flood); color: var(--turf-0); font-weight: 600; }
 main { padding: 28px clamp(16px, 4vw, 40px) 64px; max-width: 1280px; margin: 0 auto; }
@@ -304,6 +306,7 @@ if (typeof module !== 'undefined') module.exports = { APP_CSS };
     <nav class="tabs" aria-label="Bölümler">
       <a href="#oyuncular" data-tab="oyuncular">Oyuncular</a>
       <a href="#mac" data-tab="mac">Maç</a>
+      <a href="#son" data-tab="son">Son maç</a>
     <a href="#puan" data-tab="puan">Puan durumu</a>
       <a href="#yedek" data-tab="yedek">Yedek</a>
       <a href="#yetki" data-tab="yetki" hidden>Yetkiler</a>
@@ -560,7 +563,7 @@ function pitchSvg(lineup, byId, selected, title) {
     <text x="${W - 18}" y="28" text-anchor="end" ${FONT} font-size="16" font-weight="800" fill="#EEF3E8">Mavi</text>
     <text x="${W - 18}" y="58" text-anchor="end" ${FONT} font-size="30" font-weight="900" fill="#FFE7A3">${title.b}</text>
     <text x="${W / 2}" y="30" text-anchor="middle" ${FONT} font-size="15" font-weight="800" fill="#9DB8A6">${title.date}</text>
-    <text x="${W / 2}" y="55" text-anchor="middle" ${FONT} font-size="15" font-weight="800" fill="#EEF3E8">fark ${title.diff}</text>` : '';
+    <text x="${W / 2}" y="55" text-anchor="middle" ${FONT} font-size="15" font-weight="800" fill="#EEF3E8">${title.mid ?? `fark ${title.diff}`}</text>` : '';
   return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H + top}" width="${W}" height="${H + top}">
     <defs>
       <radialGradient id="floodTop" cx=".5" cy="-.05" r=".75"><stop offset="0" stop-color="#FFF6D6" stop-opacity=".2"/><stop offset="1" stop-color="#FFF6D6" stop-opacity="0"/></radialGradient>
@@ -1093,7 +1096,7 @@ function editView(id) {
   };
 }
 
-// Paylaşım menüsü varsa açar (telefon), yoksa PNG indirir.
+// Telefonda paylaşım menüsünü açar (WhatsApp vb.), bilgisayarda PNG indirir.
 async function sharePng(svg, filename) {
   const img = new Image();
   img.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg);
@@ -1102,7 +1105,9 @@ async function sharePng(svg, filename) {
   c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
   const blob = await new Promise(r => c.toBlob(r, 'image/png'));
   const file = new File([blob], filename, { type: 'image/png' });
-  if (!inArtifact && navigator.canShare?.({ files: [file] })) {
+  // Paylaşım menüsü sadece dokunmatik telefonda; bilgisayarda (Windows Chrome da destekler) doğrudan indir.
+  const phone = matchMedia('(pointer: coarse)').matches;
+  if (!inArtifact && phone && navigator.canShare?.({ files: [file] })) {
     try { return await navigator.share({ files: [file] }); }
     catch (e) { if (e.name === 'AbortError') return; }
   }
@@ -1243,7 +1248,10 @@ function drawResult() {
   $r.innerHTML = `${board}
     ${resultRow}
     <div class="row">
-      ${READONLY ? '' : `<button class="btn quiet" id="next" ${splits.length > 1 ? '' : 'disabled'}>Başka öneri${splits.length > 1 ? ` <span class="dim">${si + 1}/${splits.length}</span>` : ''}</button>`}
+      ${READONLY || splits.length < 2 ? '' : `<span class="pager" aria-label="Dengeli öneriler">
+        <button class="btn quiet" id="prev" aria-label="Önceki öneri">‹ Önceki</button>
+        <span class="dim">${si + 1}/${splits.length}</span>
+        <button class="btn quiet" id="next" aria-label="Sonraki öneri">Sonraki ›</button></span>`}
       <button class="btn" id="png">Görseli indir</button>
       ${READONLY ? '' : '<button class="btn quiet" id="html">HTML\'i indir</button>'}
     </div>
@@ -1268,7 +1276,10 @@ function drawResult() {
     else { if (selected !== id) db.match.lineup = swap(db.match.lineup, selected, id); selected = null; save(); }
     drawResult();
   };
-  $('next').onclick = () => { si = (si + 1) % splits.length; pick(); };
+  if ($('next')) {
+    $('next').onclick = () => { si = (si + 1) % splits.length; pick(); };
+    $('prev').onclick = () => { si = (si - 1 + splits.length) % splits.length; pick(); };
+  }
   $('html').onclick = downloadHtml;
   const form = $('score');
   if (form) form.onsubmit = e => {
@@ -1276,7 +1287,8 @@ function drawResult() {
     const sa = +form.a.value, sb = +form.b.value;
     const a = lineup.a.map(s => s.id), b = lineup.b.map(s => s.id);
     const { players, deltas } = applyResult(db.players, a, b, sa, sb);
-    const entry = { id: newId(), date: new Date().toISOString(), format: db.match.format, a, b, scoreA: sa, scoreB: sb, deltas };
+    const entry = { id: newId(), date: new Date().toISOString(), format: db.match.format, a, b, scoreA: sa, scoreB: sb, deltas,
+      lineup: structuredClone(lineup) }; // Son maç sekmesi dizilişi pozisyonlarıyla gösterir
     db.players = players;
     history().push(entry);
     db.match.resultId = entry.id;
@@ -1284,6 +1296,38 @@ function drawResult() {
     toast(sa === sb ? 'Beraberlik kaydedildi.' : `${sa > sb ? 'Kırmızı' : 'Mavi'} kazandı, sonuç kaydedildi.`);
     drawResult();
   };
+}
+
+// ---------------- Son maç ----------------
+function lastMatchView() {
+  const h = history().at(-1);
+  if (!h) {
+    main.innerHTML = `<div class="head"><div><h1>Son maç</h1></div></div>
+      <div class="empty">Henüz kayıtlı maç yok. Maç ekranında takımları kurup sonucu kaydedince burada görünür.</div>`;
+    return;
+  }
+  const byId = new Map(db.players.map(p => [p.id, p]));
+  // Eski kayıtlarda diziliş yok: pozisyonları bugünkü oyuncu bilgileriyle yeniden hesapla.
+  const team = ids => ids.map(id => byId.get(id)).filter(Boolean);
+  const lineup = h.lineup ?? { a: assignPositions(team(h.a), h.format), b: assignPositions(team(h.b), h.format) };
+  const date = new Date(h.date).toLocaleDateString('tr-TR', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+  const verdict = h.scoreA === h.scoreB ? 'Berabere' : `${h.scoreA > h.scoreB ? 'Kırmızı' : 'Mavi'} kazandı`;
+  main.innerHTML = `<div class="head"><div><h1>Son maç</h1><p>${date}, ${esc(h.format)}</p></div></div>
+    <section class="stage">
+      <div class="scoreboard">
+        <div class="sb-team red"><div><span class="sb-name">Kırmızı</span><small>${h.a.length} oyuncu</small></div><span class="sb-score">${h.scoreA}</span></div>
+        <div class="sb-mid"><b>–</b><span>${verdict}</span></div>
+        <div class="sb-team blue"><span class="sb-score">${h.scoreB}</span><div><span class="sb-name">Mavi</span><small>${h.b.length} oyuncu</small></div></div>
+      </div>
+      <div class="row"><button class="btn" id="png">Görseli indir</button></div>
+      <div class="field-wrap">
+        <div class="pitch">${pitchSvg(lineup, byId)}</div>
+        <div class="teams">${roster(lineup, 'a', byId)}${roster(lineup, 'b', byId)}</div>
+      </div>
+    </section>`;
+  $('png').onclick = () => sharePng(
+    pitchSvg(lineup, byId, null, { a: String(h.scoreA), b: String(h.scoreB), mid: verdict, date: new Date(h.date).toLocaleDateString('tr-TR', { day: 'numeric', month: 'long' }) }),
+    `mac-${h.date.slice(0, 10)}.png`);
 }
 
 // ---------------- Puan durumu ----------------
@@ -1426,7 +1470,7 @@ async function membersView() {
 }
 
 // ---------------- Sekmeler ----------------
-const views = { oyuncular: playersView, mac: matchView, puan: standingsView, yedek: backupView, yetki: membersView };
+const views = { oyuncular: playersView, mac: matchView, son: lastMatchView, puan: standingsView, yedek: backupView, yetki: membersView };
 function render() {
   editing = false;
   const tab = views[location.hash.slice(1)] ? location.hash.slice(1) : READONLY ? 'mac' : 'oyuncular';
