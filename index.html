@@ -336,8 +336,10 @@ main { padding: 28px clamp(16px, 4vw, 40px) 64px; max-width: 1280px; margin: 0 a
 .goals-col.b { border-top-color: var(--blue); }
 .goals-head { display: flex; justify-content: space-between; gap: 8px; margin-bottom: 6px; }
 .goals-col ol { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
-.goals-col li { display: grid; grid-template-columns: 2.6em 1fr auto; align-items: center; gap: 8px; font-variant-numeric: tabular-nums; }
+.goals-col li { display: grid; grid-template-columns: 3.2em 1fr auto; align-items: center; gap: 8px; font-variant-numeric: tabular-nums; }
 .g-min { color: var(--chalk-dim); text-align: right; }
+.g-klip { margin-left: 8px; font-size: .82rem; font-weight: 700; color: var(--flood); text-decoration: none; white-space: nowrap; }
+.g-klip:hover { text-decoration: underline; }
 .goals-col p { margin: 0; }
 .goal-form { display: flex; flex-wrap: wrap; gap: 10px; align-items: end; margin: 4px 0 18px; }
 .goal-form label { display: grid; gap: 4px; font-size: .85rem; color: var(--chalk-dim); }
@@ -595,7 +597,8 @@ function standings(players, history) {
     .sort((x, y) => y.points - x.points || y.winPct - x.winPct || y.played - x.played || x.name.localeCompare(y.name, 'tr'));
 }
 
-// Bir maçın gol listesinden geçerli olanlar: atan maçta oynamış, asist (varsa) aynı takımdan başka biri, dakika 0–120 ya da boş.
+// Bir maçın gol listesinden geçerli olanlar: atan maçta oynamış, asist (varsa) aynı takımdan başka biri, dakika 0–120 ya da boş,
+// saniye (isteğe bağlı, klip için) 0–59 ve yalnız dakikayla.
 // Takım başına en fazla skoru kadar gol (fazlası atılır).
 function cleanGoals(h) {
   const side = id => (h.a.includes(id) ? 'a' : h.b.includes(id) ? 'b' : null);
@@ -605,9 +608,10 @@ function cleanGoals(h) {
     if (!t || left[t] <= 0) return false;
     if (g.assist != null && (side(g.assist) !== t || g.assist === g.by)) return false;
     if (g.min != null && !(Number.isInteger(g.min) && g.min >= 0 && g.min <= 120)) return false;
+    if (g.sn != null && !(g.min != null && Number.isInteger(g.sn) && g.sn >= 0 && g.sn <= 59)) return false;
     left[t]--;
     return true;
-  }).map(g => ({ by: g.by, assist: g.assist ?? null, min: g.min ?? null }));
+  }).map(g => ({ by: g.by, assist: g.assist ?? null, min: g.min ?? null, ...(g.sn != null ? { sn: g.sn } : {}) }));
 }
 
 // Eski (1–10) veriyi bir kez 100'lük ölçeğe çevirir; scale: 100 işaretli veriye dokunmaz. Girdiyi yerinde değiştirir.
@@ -639,6 +643,9 @@ function migratePositions(d) {
 const ATTR_TR = { shot: 'Şut', pass: 'Pas', dribble: 'Top sürme', pace: 'Hız', defense: 'Savunma', physical: 'Fizik', goalkeeping: 'Kalecilik' };
 const POS_TR = { GK: 'Kaleci', CB: 'Stoper', LB: 'Sol bek', RB: 'Sağ bek', DEF: 'Defans', MID: 'Orta saha', FWD: 'Forvet' };
 
+// Gol zamanı yazısı: 12' ya da 12:35
+const dkText = g => (g.sn != null ? `${g.min}:${String(g.sn).padStart(2, '0')}` : `${g.min}'`);
+
 function describeChanges(prev, next) {
   const out = [];
   const before = new Map((prev?.players ?? []).map(p => [p.id, p]));
@@ -657,7 +664,7 @@ function describeChanges(prev, next) {
   for (const h of nh) if (!ph.some(x => x.id === h.id)) out.push(`Maç sonucu: Kırmızı ${h.scoreA}–${h.scoreB} Mavi`);
   for (const h of ph) if (!nh.some(x => x.id === h.id)) out.push(`Maç silindi (${h.scoreA}–${h.scoreB})`);
   const names = new Map([...(prev?.players ?? []), ...(next?.players ?? [])].map(p => [p.id, p.name]));
-  const goalText = g => `${names.get(g.by) ?? '?'}${g.assist ? ` (asist ${names.get(g.assist) ?? '?'})` : ''}${g.min != null ? ` ${g.min}'` : ''}`;
+  const goalText = g => `${names.get(g.by) ?? '?'}${g.assist ? ` (asist ${names.get(g.assist) ?? '?'})` : ''}${g.min != null ? ` ${dkText(g)}` : ''}`;
   for (const h of nh) {
     const o = ph.find(x => x.id === h.id);
     if (!o) continue;
@@ -675,7 +682,7 @@ function describeChanges(prev, next) {
 
 if (typeof module !== 'undefined') {
   module.exports = { ATTACK, DEFENSE, ATTRS, FORMATIONS, withDefaults, overall, teamTotals, splitTeams, balancedChoices, assignPositions, swap,
-    applyResult, revertResult, standings, toScale100, pickKeeper, migratePositions, DEF_POS, describeChanges, cleanGoals };
+    applyResult, revertResult, standings, toScale100, pickKeeper, migratePositions, DEF_POS, describeChanges, cleanGoals, dkText };
 }
 </script>
   <script>/* render.js */
@@ -1034,13 +1041,15 @@ function seasonVideoHtml(maclar, byId) {
 }
 
 // Goller: iki sütun (Kırmızı / Mavi), dakikaya göre. editable: silme düğmeleri ve gol ekleme formu.
-function goalsHtml(h, byId, editable) {
+// klipler: { "<atan id>-<dakika>[-<saniye>]": "analiz/<maç>/gol_….mp4" } (video analizinden)
+function goalsHtml(h, byId, editable, klipler = {}) {
+  const klip = g => klipler[`${g.by}-${g.min}${g.sn != null ? `-${g.sn}` : ''}`];
   const ad = id => esc(byId.get(id)?.name ?? '?');
   const goller = (h.goals ?? []).map((g, i) => ({ ...g, i }));
   const sutun = (t, ids, skor) => {
-    const gs = goller.filter(g => ids.includes(g.by)).sort((x, y) => (x.min ?? 999) - (y.min ?? 999));
+    const gs = goller.filter(g => ids.includes(g.by)).sort((x, y) => (x.min ?? 999) * 60 + (x.sn ?? 0) - ((y.min ?? 999) * 60 + (y.sn ?? 0)));
     return `<div class="goals-col ${t}"><div class="goals-head"><b>${TEAM_NAME[t]}</b><span class="dim">${gs.length}/${skor} gol girildi</span></div>
-      ${gs.length ? `<ol>${gs.map(g => `<li><span class="g-min">${g.min != null ? `${g.min}'` : ''}</span><span><b>${ad(g.by)}</b>${g.assist ? ` <span class="dim">asist ${ad(g.assist)}</span>` : ''}</span>
+      ${gs.length ? `<ol>${gs.map(g => `<li><span class="g-min">${g.min != null ? dkText(g) : ''}</span><span><b>${ad(g.by)}</b>${g.assist ? ` <span class="dim">asist ${ad(g.assist)}</span>` : ''}${klip(g) ? ` <a class="g-klip" href="${esc(klip(g))}" target="_blank" rel="noopener">▶ izle</a>` : ''}</span>
         ${editable ? `<button class="btn quiet small" data-gol-sil="${g.i}" aria-label="${ad(g.by)} golünü sil">Sil</button>` : ''}</li>`).join('')}</ol>`
         : '<p class="dim">Henüz girilmedi.</p>'}</div>`;
   };
@@ -1049,7 +1058,7 @@ function goalsHtml(h, byId, editable) {
   const form = editable && !dolu ? `<form class="goal-form" id="gol-form">
       <label>Golü atan<select class="input" name="by" required><optgroup label="Kırmızı">${secenek(h.a)}</optgroup><optgroup label="Mavi">${secenek(h.b)}</optgroup></select></label>
       <label>Asist<select class="input" name="assist"></select></label>
-      <label>Dakika<input class="input" name="min" type="number" min="0" max="120" inputmode="numeric" placeholder="örn. 23"></label>
+      <label>Dakika (saniye isteğe bağlı)<input class="input" name="min" inputmode="numeric" pattern="\\d{1,3}(:[0-5]\\d)?" placeholder="23 ya da 23:40" title="Maç başlangıcından itibaren dakika, ya da dakika:saniye (ör. 23:40). Saniye girilirse kısa gol klibi çıkar."></label>
       <button class="btn">Gol ekle</button>
     </form>` : '';
   if (!goller.length && !editable) return '';
@@ -1872,7 +1881,7 @@ function lastMatchView() {
 function drawGoals(h, byId) {
   const yer = $('goller');
   if (!yer) return;
-  yer.innerHTML = goalsHtml(h, byId, !READONLY);
+  yer.innerHTML = goalsHtml(h, byId, !READONLY, analizler.get(h.id)?.klipler);
   if (READONLY) return;
   const f = $('gol-form');
   const atan = f?.elements.by, asist = f?.elements.assist;
@@ -1886,10 +1895,10 @@ function drawGoals(h, byId) {
     asistler();
     f.onsubmit = e => {
       e.preventDefault();
-      const dk = f.elements.min.value === '' ? null : Number(f.elements.min.value);
-      const yeni = [...(h.goals ?? []), { by: atan.value, assist: asist.value || null, min: dk }];
+      const [dk, sn] = f.elements.min.value.trim() === '' ? [null, null] : f.elements.min.value.trim().split(':').map(Number);
+      const yeni = [...(h.goals ?? []), { by: atan.value, assist: asist.value || null, min: dk, ...(sn != null ? { sn } : {}) }];
       const temiz = cleanGoals({ ...h, goals: yeni });
-      if (temiz.length < yeni.length) return toast(`${h.a.includes(atan.value) ? 'Kırmızı' : 'Mavi'} takımın tüm golleri zaten girildi ya da dakika geçersiz (0–120).`);
+      if (temiz.length < yeni.length) return toast(`${h.a.includes(atan.value) ? 'Kırmızı' : 'Mavi'} takımın tüm golleri zaten girildi ya da zaman geçersiz (dakika 0–120, saniye 0–59).`);
       h.goals = temiz;
       save();
       toast(`Gol eklendi: ${byId.get(atan.value)?.name ?? '?'}`);
