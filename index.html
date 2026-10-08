@@ -312,6 +312,13 @@ main { padding: 28px clamp(16px, 4vw, 40px) 64px; max-width: 1280px; margin: 0 a
 .m-teams { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; font-size: .8rem; color: var(--chalk-dim); }
 .m-teams span:last-child { text-align: right; }
 
+/* ---------- Gerçek diziliş ---------- */
+.formations { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; margin: 10px 0 20px; }
+@media (max-width: 900px) { .formations { grid-template-columns: minmax(0, 1fr); } }
+.formations figure { margin: 0; display: grid; gap: 6px; }
+.formations figcaption { font-family: var(--display); font-size: 1.15rem; }
+.formations svg { width: 100%; height: auto; display: block; }
+
 /* ---------- Goller ---------- */
 .goals { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; margin: 12px 0; }
 @media (max-width: 600px) { .goals { grid-template-columns: minmax(0, 1fr); } }
@@ -889,6 +896,76 @@ function staticPage(d, css) {
 `;
 }
 
+// Gerçek diziliş: oyuncuların videodaki ortalama konumu, takım başına yatay saha (kendi kalesi solda, hücum sağa).
+// Konum ölçülen ortalama; üst üste binen rozetler en az kaydırmayla ayrılır. Renk = Maç analizi kartları.
+const FW = 520, FH = 312, FM = 14;                 // 50 x 30 m saha, piksel
+const FTIER = o => (o >= 75 ? 'gold' : o >= 65 ? 'silver' : 'bronze');
+const FGRAD = { gold: ['#F4DC8A', '#B8913A'], silver: ['#EEF1F4', '#9AA5B0'], bronze: ['#E9B98C', '#9A5F33'] };
+function yerlesim(ps) {
+  // Çakışan iki rozet (isim etiketiyle 66 x 64 px kutu), en az kaydırma gereken eksende birbirinden itilir.
+  const pts = ps.map(o => ({ o, x: FM + (o.konum[0] / 50) * FW, y: FM + (o.konum[1] / 30) * FH }));
+  const BX = 66, BY = 64;
+  for (let it = 0; it < 200; it++) {
+    let oynadi = false;
+    for (let i = 0; i < pts.length; i++) for (let j = i + 1; j < pts.length; j++) {
+      const p = pts[i], q = pts[j], dx = q.x - p.x, dy = q.y - p.y, ox = BX - Math.abs(dx), oy = BY - Math.abs(dy);
+      if (ox <= 0 || oy <= 0) continue;
+      oynadi = true;
+      if (ox / BX < oy / BY) { const s = (dx >= 0 ? 1 : -1) * (ox / 2 + 0.5); p.x -= s; q.x += s; }
+      else { const s = (dy >= 0 ? 1 : -1) * (oy / 2 + 0.5); p.y -= s; q.y += s; }
+    }
+    for (const p of pts) {
+      p.x = Math.min(FM + FW - 30, Math.max(FM + 30, p.x));
+      p.y = Math.min(FM + FH - 30, Math.max(FM + 22, p.y));
+    }
+    if (!oynadi) break;
+  }
+  return pts;
+}
+function formationSvg(a, t, dy = 0) {
+  const ps = a.oyuncular.filter(o => o.taraf === t && o.konum);
+  const W2 = FW + 2 * FM, H2 = FH + 2 * FM, m = (x, y) => [FM + (x / 50) * FW, FM + (y / 30) * FH];
+  const [x0, y0] = m(0, 0), [x1, y1] = m(50, 30), [cx, cy] = m(25, 15), [, bt] = m(0, 9), [, bb] = m(0, 21), [b6] = m(6, 0), [b44] = m(44, 0);
+  const id = `f${t}${dy}`;
+  const serit = Array.from({ length: 10 }, (_, k) => `<rect x="${FM + (k * FW) / 10}" y="${FM}" width="${FW / 10}" height="${FH}" fill="${k % 2 ? '#1E6B3C' : '#237744'}"/>`).join('');
+  const rozet = yerlesim(ps).map(({ o, x, y }) => `<g transform="translate(${x.toFixed(1)} ${y.toFixed(1)})">
+      <circle r="19" fill="url(#${id}-${FTIER(o.genel)})" stroke="${COLOR[t]}" stroke-width="3"/>
+      <text y="6" text-anchor="middle" ${FONT} font-size="17" font-weight="900" fill="${MINI_INK[FTIER(o.genel)]}">${o.genel}</text>
+      <text y="38" text-anchor="middle" ${FONT} font-size="16" font-weight="900" fill="#fff" stroke="#0B2318" stroke-width="4" paint-order="stroke">${esc(kisa(o.ad))}</text>
+    </g>`).join('');
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 ${-dy} ${W2} ${H2}" width="${W2}" height="${H2}" role="img" aria-label="${TEAM_NAME[t]} ortalama dizilişi">
+    <defs>${Object.entries(FGRAD).map(([k, [c1, c2]]) => `<linearGradient id="${id}-${k}" x1="0" y1="0" x2=".55" y2="1"><stop offset="0" stop-color="${c1}"/><stop offset=".7" stop-color="${c2}"/></linearGradient>`).join('')}</defs>
+    <rect width="${W2}" height="${H2}" rx="12" fill="#17502E"/>${serit}
+    <g fill="none" stroke="#EEF3E8" stroke-width="2" opacity=".75">
+      <rect x="${x0}" y="${y0}" width="${x1 - x0}" height="${y1 - y0}" rx="3"/><line x1="${cx}" y1="${y0}" x2="${cx}" y2="${y1}"/>
+      <circle cx="${cx}" cy="${cy}" r="${(4 / 50) * FW}"/><rect x="${x0}" y="${bt}" width="${b6 - x0}" height="${bb - bt}"/><rect x="${b44}" y="${bt}" width="${x1 - b44}" height="${bb - bt}"/>
+    </g>
+    <rect x="${x0 - 6}" y="${cy - 16}" width="6" height="32" fill="${COLOR[t]}"/>
+    <text x="${x1 - 10}" y="${y0 + 22}" text-anchor="end" ${FONT} font-size="15" font-weight="800" fill="#EEF3E8" opacity=".85">hücum →</text>
+    ${rozet}</svg>`;
+}
+function formationsHtml(a) {
+  return `<h2 class="sub-h">Gerçek diziliş</h2>
+    <p class="hint">Oyuncuların maç boyunca videoda ortalama durduğu yer (iki yarı birleştirildi, kendi kalesi solda). Üst üste binen rozetler okunsun diye biraz kaydırıldı.</p>
+    <div class="formations">${['a', 'b'].map(t => `<figure><figcaption><b>${TEAM_NAME[t]}</b></figcaption>${formationSvg(a, t)}</figure>`).join('')}</div>`;
+}
+// Paylaşım görseli: skor bandı + iki takımın dizilişi alt alta.
+function formationsPng(a, title) {
+  const W2 = FW + 2 * FM, H2 = FH + 2 * FM, ust = 70, ara = 34;
+  const blok = (t, y) => `<g transform="translate(0 ${y})"><text x="18" y="24" ${FONT} font-size="20" font-weight="900" fill="${COLOR[t]}">${TEAM_NAME[t]}</text>
+    <g transform="translate(0 ${ara})">${formationSvg(a, t).replace(/^<svg[^>]*>/, '').replace(/<\/svg>$/, '')}</g></g>`;
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W2} ${ust + 2 * (H2 + ara) + 10}" width="${W2}" height="${ust + 2 * (H2 + ara) + 10}">
+    <rect width="100%" height="100%" fill="#0B2318"/>
+    <rect width="6" height="${ust}" fill="${COLOR.a}"/><rect x="${W2 - 6}" width="6" height="${ust}" fill="${COLOR.b}"/>
+    <text x="18" y="28" ${FONT} font-size="16" font-weight="800" fill="#EEF3E8">Kırmızı</text>
+    <text x="18" y="58" ${FONT} font-size="30" font-weight="900" fill="#FFE7A3">${title.a}</text>
+    <text x="${W2 - 18}" y="28" text-anchor="end" ${FONT} font-size="16" font-weight="800" fill="#EEF3E8">Mavi</text>
+    <text x="${W2 - 18}" y="58" text-anchor="end" ${FONT} font-size="30" font-weight="900" fill="#FFE7A3">${title.b}</text>
+    <text x="${W2 / 2}" y="30" text-anchor="middle" ${FONT} font-size="15" font-weight="800" fill="#9DB8A6">${title.date}</text>
+    <text x="${W2 / 2}" y="55" text-anchor="middle" ${FONT} font-size="15" font-weight="800" fill="#EEF3E8">${title.mid}</text>
+    ${blok('a', ust)}${blok('b', ust + H2 + ara)}</svg>`;
+}
+
 // Puan karşılaştırması videodan: takımların maç puanı ortalaması ve ölçülen değerlerin takım ortalamaları.
 const VIDEO_ADI = { HIZ: 'Hız', PAT: 'Patlayıcılık', DAY: 'Dayanıklılık', ALN: 'Alan', 'HÜC': 'Hücum', SAV: 'Savunma' };
 function videoCompareHtml(a) {
@@ -965,7 +1042,7 @@ function analysisHtml(a, base, goals = []) {
     </dl>`;
 }
 
-if (typeof module !== 'undefined') module.exports = { card, pitchSvg, scoreboard, roster, standingsTable, historyList, staticSections, staticPage, analysisHtml, analysisTeamsHtml, analysisPlayerHtml, goalsHtml, videoCompareHtml };
+if (typeof module !== 'undefined') module.exports = { card, pitchSvg, scoreboard, roster, standingsTable, historyList, staticSections, staticPage, analysisHtml, analysisTeamsHtml, analysisPlayerHtml, goalsHtml, videoCompareHtml, formationsHtml, formationsPng };
 </script>
   <script>/* cloud.js */
 // Supabase ortak veri bağlantısı. URL ve anahtar boşsa uygulama bu cihazda (localStorage) çalışır.
@@ -1700,11 +1777,12 @@ function lastMatchView() {
       </div>
       <h2 class="sub-h">Puan karşılaştırması</h2>
       ${a ? `<p class="hint">Maçtaki performanstan: puanlar iki kameradan ölçülen koşu verisiyle hesaplandı (aşağıda Maç analizi).</p>${videoCompareHtml(a)}` : scoreboard(lineup, byId).html}
+      ${a?.oyuncular?.some(o => o.konum) ? formationsHtml(a) : ''}
       <div class="row"><button class="btn" id="png">Görseli indir</button></div>
-      <div class="field-wrap">
+      ${a?.oyuncular?.some(o => o.konum) ? '' : `<div class="field-wrap">
         <div class="pitch">${pitchSvg(lineup, byId, null, null, { cards: true, rate, tier })}</div>
         <div class="teams">${roster(lineup, 'a', byId, null, rate)}${roster(lineup, 'b', byId, null, rate)}</div>
-      </div>
+      </div>`}
     </section>
     <section id="goller"></section>
     <section id="analiz"></section>`;
@@ -1725,8 +1803,9 @@ function lastMatchView() {
       if (e.target.closest('[data-an-teams]')) sec(null);
     };
   }
+  const baslik = { a: String(h.scoreA), b: String(h.scoreB), mid: verdict, date: new Date(h.date).toLocaleDateString('tr-TR', { day: 'numeric', month: 'long' }) };
   $('png').onclick = () => sharePng(
-    pitchSvg(lineup, byId, null, { a: String(h.scoreA), b: String(h.scoreB), mid: verdict, date: new Date(h.date).toLocaleDateString('tr-TR', { day: 'numeric', month: 'long' }) }, { cards: true, rate, tier }),
+    a?.oyuncular?.some(o => o.konum) ? formationsPng(a, baslik) : pitchSvg(lineup, byId, null, baslik, { cards: true, rate, tier }),
     `mac-${h.date.slice(0, 10)}.png`);
 }
 
