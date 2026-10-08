@@ -950,7 +950,7 @@ function analysisHtml(a, base, goals = []) {
       <span class="mc-top"><span class="mc-ovr"><b>${o.genel}</b><span>${o.mevki}</span></span><span class="mc-team ${o.taraf}">${TEAM_NAME[o.taraf]}</span></span>
       <span class="mc-name">${esc(o.ad)}</span>
       <span class="mc-stats">${Object.entries(o.s).map(([k, v]) => `<span><b>${v}</b> ${k}</span>`).join('')}</span>
-      ${sayi(o.id)}<span class="mc-foot">${o.km.toFixed(1)} km · ${o.kmh} km/s${o.az ? ' · az görüntü' : ''}</span>
+      ${sayi(o.id)}<span class="mc-foot">${o.km.toFixed(1)} km · ${o.kmh} km/s${o.kalede ? ` · kalede ${o.kalede} dk` : ''}${o.az ? ' · az görüntü' : ''}</span>
     </button>`;
   return `<h2 class="sub-h">Maç analizi</h2>
     <p class="hint">İki kameradan otomatik ölçüldü: ${Math.round(a.mac_dk)} dakika, devre arası ${Math.round(a.devre_arasi_dk)}. dakikada. Isı haritalarında takımın kendi kalesi hep solda. Bir karta bas: o oyuncunun ısı haritası görünür. Pas, şut ve top tekniği ölçülmedi.</p>
@@ -961,6 +961,7 @@ function analysisHtml(a, base, goals = []) {
       <dt>DAY</dt><dd>Dayanıklılık: toplam koşu mesafesi</dd><dt>ALN</dt><dd>Sahanın ne kadarını kullandı</dd>
       <dt>HÜC / SAV</dt><dd>Rakip / kendi kale tarafındaki üçlükte geçen zaman</dd>
       <dt>Az görüntü</dt><dd>Maçın yarısından azında tanınabildi; puanı daha kaba</dd>
+      <dt>Kalede</dt><dd>Sırayla kaleye geçenlerin puanı sahada oynadığı dakikalardan hesaplanır</dd>
     </dl>`;
 }
 
