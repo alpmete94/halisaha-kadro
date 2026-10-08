@@ -312,6 +312,16 @@ main { padding: 28px clamp(16px, 4vw, 40px) 64px; max-width: 1280px; margin: 0 a
 .m-teams { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; font-size: .8rem; color: var(--chalk-dim); }
 .m-teams span:last-child { text-align: right; }
 
+/* ---------- Maçın adamı ---------- */
+.motm { --a: #f4dc8a; --b: #b8913a; display: flex; gap: 14px; align-items: center; margin: 14px 0 4px; padding: 10px 16px 10px 10px;
+  background: var(--turf-1); border: 1px solid var(--turf-2); border-left: 4px solid var(--flood); border-radius: 14px; }
+.motm.silver { --a: #eef1f4; --b: #9aa5b0; } .motm.bronze { --a: #e9b98c; --b: #9a5f33; }
+.motm-rt { flex: 0 0 auto; width: 54px; height: 60px; display: grid; place-items: center; font: 900 1.7rem/1 var(--display); color: #2a1f06;
+  background: linear-gradient(160deg, var(--a), var(--b) 70%); clip-path: polygon(50% 0, 100% 8%, 100% 84%, 50% 100%, 0 84%, 0 8%); }
+.motm > span:last-child { display: grid; gap: 1px; }
+.motm small { color: var(--flood); font-weight: 700; letter-spacing: .04em; }
+.motm b { font: 900 1.6rem/1 var(--display); text-transform: capitalize; }
+
 /* ---------- Gerçek diziliş ---------- */
 .formations { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; margin: 10px 0 20px; }
 @media (max-width: 900px) { .formations { grid-template-columns: minmax(0, 1fr); } }
@@ -979,7 +989,48 @@ function videoCompareHtml(a) {
       <div class="sb-mid"><b>${fmt(Math.abs(A - B))}</b><span>fark</span></div>
       <div class="sb-team blue"><span class="sb-score">${fmt(B)}</span><div><span class="sb-name">Mavi</span><small>maç puanı ortalaması</small></div></div>
     </div>
-    <div class="bars">${Object.keys(VIDEO_ADI).map(k => bar(VIDEO_ADI[k], ort('a', o => o.s[k]), ort('b', o => o.s[k]))).join('')}${bar('Toplam koşu (km)', a.takimlar.a.km, a.takimlar.b.km, x => x.toFixed(1))}</div>`;
+    <div class="bars">${Object.keys(VIDEO_ADI).map(k => bar(VIDEO_ADI[k], ort('a', o => o.s[k]), ort('b', o => o.s[k]))).join('')}${bar('Toplam koşu (km)', a.takimlar.a.km, a.takimlar.b.km, x => x.toFixed(1))}${[0, 1].map(y => {
+      const t = k => ort(k, o => o.yari?.[y] ?? 0);
+      return a.oyuncular.some(o => o.yari) ? bar(`${y + 1}. yarı tempo (m/dk)`, t('a'), t('b')) : '';
+    }).join('')}</div>`;
+}
+
+// Maçın adamı: maç puanı + gol ×4 + asist ×2 + kazanan takıma 2.
+function motm(a, h) {
+  const g = id => (h.goals ?? []).filter(x => x.by === id).length, as = id => (h.goals ?? []).filter(x => x.assist === id).length;
+  const kazanan = h.scoreA === h.scoreB ? null : h.scoreA > h.scoreB ? 'a' : 'b';
+  const puan = o => o.genel + 4 * g(o.id) + 2 * as(o.id) + (o.taraf === kazanan ? 2 : 0);
+  const o = [...a.oyuncular].sort((x, y) => puan(y) - puan(x))[0];
+  return o && { o, gol: g(o.id), asist: as(o.id) };
+}
+function motmHtml(a, h) {
+  const m = motm(a, h);
+  if (!m) return '';
+  const ek = [m.gol && `${m.gol} gol`, m.asist && `${m.asist} asist`].filter(Boolean).join(' · ');
+  return `<div class="motm ${FTIER(m.o.genel)}"><span class="motm-rt">${m.o.genel}</span>
+    <span><small>Maçın adamı</small><b>${esc(m.o.ad)}</b><span class="dim">${TEAM_NAME[m.o.taraf]}, ${MEVKI[m.o.mevki]}${ek ? ` · ${ek}` : ''} · ${m.o.km.toFixed(1)} km</span></span></div>`;
+}
+// Sezon (videosu işlenen maçlar): oyuncu başına maç puanı ortalaması, son maçtaki değişim, km ve zirve hız.
+function seasonVideoHtml(maclar, byId) {
+  const sat = new Map();
+  for (const a of maclar) for (const o of a.oyuncular) {
+    if (!o.id || !byId.has(o.id)) continue;
+    const s = sat.get(o.id) ?? sat.set(o.id, { ad: byId.get(o.id).name, puan: [], km: [], hiz: 0 }).get(o.id);
+    s.puan.push(o.genel); s.km.push(o.km); s.hiz = Math.max(s.hiz, o.kmh);
+  }
+  if (!sat.size) return '';
+  const ort = xs => xs.reduce((x, y) => x + y, 0) / xs.length;
+  const rows = [...sat.values()].sort((x, y) => ort(y.puan) - ort(x.puan));
+  return `<h2 class="sub-h">Video istatistikleri</h2>
+    <p class="hint">Videosu işlenen ${maclar.length} maçtan. Değişim: son maç puanı, bir önceki maça göre.</p>
+    <div class="table-wrap"><table class="standings">
+    <thead><tr><th>#</th><th class="l">Oyuncu</th><th title="Videosu işlenen maç">Maç</th><th>Ort. puan</th><th>Son</th><th title="Son maç, bir öncekine göre">Değişim</th><th>Ort. km</th><th title="En yüksek hız (km/s)">Zirve</th></tr></thead>
+    <tbody>${rows.map((s, i) => {
+      const d = s.puan.length > 1 ? s.puan.at(-1) - s.puan.at(-2) : null;
+      return `<tr><td>${i + 1}</td><td class="l">${esc(s.ad)}</td><td>${s.puan.length}</td><td class="pts">${fmt(ort(s.puan))}</td><td>${s.puan.at(-1)}</td>
+        <td>${d == null ? '<span class="dim">–</span>' : `<span class="form-tag ${d >= 0 ? 'up' : 'down'}">${d >= 0 ? '▲' : '▼'}${Math.abs(d)}</span>`}</td>
+        <td>${ort(s.km).toFixed(1)}</td><td>${s.hiz}</td></tr>`;
+    }).join('')}</tbody></table></div>`;
 }
 
 // Goller: iki sütun (Kırmızı / Mavi), dakikaya göre. editable: silme düğmeleri ve gol ekleme formu.
@@ -1013,9 +1064,16 @@ function analysisTeamsHtml(a, base) {
   return ['a', 'b'].map(t => `<figure><img src="${base}/${a.takimlar[t].isi}" alt="${TEAM_NAME[t]} ısı haritası">
     <figcaption><b>${TEAM_NAME[t]}${a.takimlar[t].yelek ? ' (yelekli)' : ''}</b> <span class="dim">${a.takimlar[t].km} km toplam koşu</span></figcaption></figure>`).join('');
 }
+// Yorgunluk: dakikada koşulan metre, 1. yarı -> 2. yarı.
+function tempoText(o) {
+  const [a, b] = o.yari ?? [];
+  if (!a || !b) return '';
+  const d = Math.round((100 * (b - a)) / a);
+  return ` · tempo ${a} → ${b} m/dk (${d > 0 ? '+' : ''}${d}%)`;
+}
 function analysisPlayerHtml(o, base) {
   return `<figure class="an-one"><img src="${base}/${o.isi}" alt="${esc(o.ad)} ısı haritası">
-    <figcaption><b>${esc(o.ad)}</b> <span class="dim">${TEAM_NAME[o.taraf]}, ${MEVKI[o.mevki]} · ${o.km.toFixed(1)} km · ${o.kmh} km/s</span>
+    <figcaption><b>${esc(o.ad)}</b> <span class="dim">${TEAM_NAME[o.taraf]}, ${MEVKI[o.mevki]} · ${o.km.toFixed(1)} km · ${o.kmh} km/s${tempoText(o)}</span>
     <button class="btn quiet" data-an-teams>Takımları göster</button></figcaption></figure>`;
 }
 function analysisHtml(a, base, goals = []) {
@@ -1039,10 +1097,11 @@ function analysisHtml(a, base, goals = []) {
       <dt>HÜC / SAV</dt><dd>Rakip / kendi kale tarafındaki üçlükte geçen zaman</dd>
       <dt>Az görüntü</dt><dd>Maçın yarısından azında tanınabildi; puanı daha kaba</dd>
       <dt>Kalede</dt><dd>Sırayla kaleye geçenlerin puanı sahada oynadığı dakikalardan hesaplanır</dd>
+      <dt>Tempo</dt><dd>Dakikada koşulan metre, 1. ve 2. yarı (karta bas; kalede geçen süre tempoyu düşürür)</dd>
     </dl>`;
 }
 
-if (typeof module !== 'undefined') module.exports = { card, pitchSvg, scoreboard, roster, standingsTable, historyList, staticSections, staticPage, analysisHtml, analysisTeamsHtml, analysisPlayerHtml, goalsHtml, videoCompareHtml, formationsHtml, formationsPng };
+if (typeof module !== 'undefined') module.exports = { card, pitchSvg, scoreboard, roster, standingsTable, historyList, staticSections, staticPage, analysisHtml, analysisTeamsHtml, analysisPlayerHtml, goalsHtml, videoCompareHtml, formationsHtml, formationsPng, motm, motmHtml, seasonVideoHtml };
 </script>
   <script>/* cloud.js */
 // Supabase ortak veri bağlantısı. URL ve anahtar boşsa uygulama bu cihazda (localStorage) çalışır.
@@ -1741,6 +1800,8 @@ function drawResult() {
 
 // ---------------- Son maç ----------------
 const analizler = new Map(); // maç kaydı id -> video analizi (yoksa null); bir kez okunur
+const analizGetir = id => (analizler.has(id) ? Promise.resolve(analizler.get(id))
+  : fetch(`analiz/${id}/analiz.json`).then(r => (r.ok ? r.json() : null)).catch(() => null).then(x => (analizler.set(id, x), x)));
 function lastMatchView() {
   const h = history().at(-1);
   if (!h) {
@@ -1752,10 +1813,7 @@ function lastMatchView() {
   if (!analizler.has(h.id)) {
     // Video analizi (siteyle yayınlanan analiz/<maç id>/analiz.json) varsa puanlar ondan gelir; yoksa kart puanları.
     main.innerHTML = '<p class="dim">Yükleniyor…</p>';
-    fetch(`${base}/analiz.json`).then(r => (r.ok ? r.json() : null)).catch(() => null).then(x => {
-      analizler.set(h.id, x);
-      if (location.hash.slice(1) === 'son') lastMatchView();
-    });
+    analizGetir(h.id).then(() => { if (location.hash.slice(1) === 'son') lastMatchView(); });
     return;
   }
   const a = analizler.get(h.id);
@@ -1775,6 +1833,7 @@ function lastMatchView() {
         <div class="sb-mid"><b>–</b><span>${verdict}</span></div>
         <div class="sb-team blue"><span class="sb-score">${h.scoreB}</span><div><span class="sb-name">Mavi</span><small>${h.b.length} oyuncu</small></div></div>
       </div>
+      ${a ? motmHtml(a, h) : ''}
       <h2 class="sub-h">Puan karşılaştırması</h2>
       ${a ? `<p class="hint">Maçtaki performanstan: puanlar iki kameradan ölçülen koşu verisiyle hesaplandı (aşağıda Maç analizi).</p>${videoCompareHtml(a)}` : scoreboard(lineup, byId).html}
       ${a?.oyuncular?.some(o => o.konum) ? formationsHtml(a) : ''}
@@ -1853,7 +1912,12 @@ function standingsView() {
   main.innerHTML = `<div class="head"><div><h1>Puan durumu</h1>
       <p>Galibiyet 3, beraberlik 1 puan. Form: her galibiyet kart puanına +1, her mağlubiyet −1 ekler (en fazla ±10).</p></div></div>
     ${standingsTable(standings(db.players, hist))}
+    <section id="sezon-video"></section>
     ${hist.length ? `<h2 class="sub-h">Maç geçmişi</h2>${historyList(hist, byId, !READONLY)}` : ''}`;
+  Promise.all(hist.map(h => analizGetir(h.id))).then(xs => {
+    const yer = $('sezon-video');
+    if (yer) yer.innerHTML = seasonVideoHtml(xs.filter(Boolean), byId);
+  });
   if (READONLY) return;
   main.querySelectorAll('[data-del]').forEach(btn => {
     btn.onclick = async () => {
