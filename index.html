@@ -711,8 +711,8 @@ const MINI = 'M-23,-27 L0,-31 L23,-27 L23,21 L0,30 L-23,21 Z';
 const TIER = o => (o >= 70 ? 'gold' : o >= 50 ? 'silver' : 'bronze');
 const MINI_INK = { gold: '#3A2A08', silver: '#1E252C', bronze: '#2E1606' };
 const kisa = s => (s.length > 8 ? `${s.slice(0, 7)}…` : s);
-function miniCard(s, p, t, sel) {
-  const r = p ? slotRating(s, p) : 0, tier = TIER(r), ink = MINI_INK[tier];
+function miniCard(s, p, t, sel, rate = slotRating) {
+  const r = p ? rate(s, p) : 0, tier = TIER(r), ink = MINI_INK[tier];
   return `${sel ? `<path d="${MINI}" fill="none" stroke="#FFE7A3" stroke-width="7" opacity=".6"/>` : ''}
     <path d="${MINI}" fill="url(#mini-${tier})" stroke="${sel ? '#FFE7A3' : COLOR[t]}" stroke-width="${sel ? 3 : 2.5}" stroke-linejoin="round"/>
     <text y="-9" text-anchor="middle" ${FONT} font-size="19" font-weight="900" fill="${ink}">${p ? fmt(r) : '?'}</text>
@@ -721,7 +721,7 @@ function miniCard(s, p, t, sel) {
     <text y="20" text-anchor="middle" ${FONT} font-size="11" font-weight="800" fill="${ink}">${p ? esc(kisa(p.name)) : '?'}</text>`;
 }
 
-// opts.cards: oyuncular forma yerine mini FUT kartıyla çizilir (Son maç).
+// opts.cards: oyuncular forma yerine mini FUT kartıyla çizilir (Son maç). opts.rate(slot, oyuncu): gösterilecek puan (varsayılan kart puanı).
 function pitchSvg(lineup, byId, selected, title, opts = {}) {
   const top = title ? 70 : 0;
   const marks = [];
@@ -741,7 +741,7 @@ function pitchSvg(lineup, byId, selected, title, opts = {}) {
         const p = byId.get(s.id);
         const sel = s.id === selected;
         if (opts.cards) {
-          marks.push(`<g class="pl" data-id="${esc(s.id)}" transform="translate(${x} ${y})"><g style="--i:${i++}">${miniCard(s, p, t, sel)}</g></g>`);
+          marks.push(`<g class="pl" data-id="${esc(s.id)}" transform="translate(${x} ${y})"><g style="--i:${i++}">${miniCard(s, p, t, sel, opts.rate)}</g></g>`);
           return;
         }
         marks.push(`<g class="pl" data-id="${esc(s.id)}" transform="translate(${x} ${y})"><g style="--i:${i++}">
@@ -803,13 +803,13 @@ function scoreboard(lineup, byId) {
   return { html, A, B, diff };
 }
 
-function roster(lineup, t, byId, selected) {
+function roster(lineup, t, byId, selected, rate = slotRating) {
   const [cls, name] = t === 'a' ? ['red', 'Kırmızı'] : ['blue', 'Mavi'];
   return `<div class="team ${cls}"><h2><span>${name}</span><small class="dim">${lineup[t].length} kişi</small></h2>
     <ul>${lineup[t].map(s => {
       const p = byId.get(s.id);
       return `<li class="${s.pos === 'SUB' ? 'sub' : ''}"><button type="button" class="pl ${s.id === selected ? 'sel' : ''}" data-id="${esc(s.id)}">
-        <span class="tag">${SHORT[s.pos]}</span><span>${esc(p?.name ?? '?')}</span><span class="rt" ${s.pos === 'GK' ? 'title="Kalecilik puanı"' : ''}>${p ? fmt(slotRating(s, p)) : ''}</span></button></li>`;
+        <span class="tag">${SHORT[s.pos]}</span><span>${esc(p?.name ?? '?')}</span><span class="rt" ${s.pos === 'GK' && rate === slotRating ? 'title="Kalecilik puanı"' : ''}>${p ? fmt(rate(s, p)) : ''}</span></button></li>`;
     }).join('')}</ul></div>`;
 }
 
@@ -889,6 +889,22 @@ function staticPage(d, css) {
 `;
 }
 
+// Puan karşılaştırması videodan: takımların maç puanı ortalaması ve ölçülen değerlerin takım ortalamaları.
+const VIDEO_ADI = { HIZ: 'Hız', PAT: 'Patlayıcılık', DAY: 'Dayanıklılık', ALN: 'Alan', 'HÜC': 'Hücum', SAV: 'Savunma' };
+function videoCompareHtml(a) {
+  const ps = t => a.oyuncular.filter(o => o.taraf === t);
+  const ort = (t, f) => { const xs = ps(t).map(f); return xs.length ? xs.reduce((x, y) => x + y, 0) / xs.length : 0; };
+  const A = ort('a', o => o.genel), B = ort('b', o => o.genel);
+  const bar = (label, x, y, f = Math.round) => `<div class="bar"><span class="label">${label}</span>
+    <span>${f(x)}</span><div class="track"><i style="flex:${x}"></i><i style="flex:${y}"></i></div><span>${f(y)}</span></div>`;
+  return `<div class="scoreboard">
+      <div class="sb-team red"><div><span class="sb-name">Kırmızı</span><small>maç puanı ortalaması</small></div><span class="sb-score">${fmt(A)}</span></div>
+      <div class="sb-mid"><b>${fmt(Math.abs(A - B))}</b><span>fark</span></div>
+      <div class="sb-team blue"><span class="sb-score">${fmt(B)}</span><div><span class="sb-name">Mavi</span><small>maç puanı ortalaması</small></div></div>
+    </div>
+    <div class="bars">${Object.keys(VIDEO_ADI).map(k => bar(VIDEO_ADI[k], ort('a', o => o.s[k]), ort('b', o => o.s[k]))).join('')}${bar('Toplam koşu (km)', a.takimlar.a.km, a.takimlar.b.km, x => x.toFixed(1))}</div>`;
+}
+
 // Goller: iki sütun (Kırmızı / Mavi), dakikaya göre. editable: silme düğmeleri ve gol ekleme formu.
 function goalsHtml(h, byId, editable) {
   const ad = id => esc(byId.get(id)?.name ?? '?');
@@ -948,7 +964,7 @@ function analysisHtml(a, base, goals = []) {
     </dl>`;
 }
 
-if (typeof module !== 'undefined') module.exports = { card, pitchSvg, scoreboard, roster, standingsTable, historyList, staticSections, staticPage, analysisHtml, analysisTeamsHtml, analysisPlayerHtml, goalsHtml };
+if (typeof module !== 'undefined') module.exports = { card, pitchSvg, scoreboard, roster, standingsTable, historyList, staticSections, staticPage, analysisHtml, analysisTeamsHtml, analysisPlayerHtml, goalsHtml, videoCompareHtml };
 </script>
   <script>/* cloud.js */
 // Supabase ortak veri bağlantısı. URL ve anahtar boşsa uygulama bu cihazda (localStorage) çalışır.
@@ -1646,6 +1662,7 @@ function drawResult() {
 }
 
 // ---------------- Son maç ----------------
+const analizler = new Map(); // maç kaydı id -> video analizi (yoksa null); bir kez okunur
 function lastMatchView() {
   const h = history().at(-1);
   if (!h) {
@@ -1653,10 +1670,23 @@ function lastMatchView() {
       <div class="empty">Henüz kayıtlı maç yok. Maç ekranında takımları kurup sonucu kaydedince burada görünür.</div>`;
     return;
   }
+  const base = `analiz/${h.id}`;
+  if (!analizler.has(h.id)) {
+    // Video analizi (siteyle yayınlanan analiz/<maç id>/analiz.json) varsa puanlar ondan gelir; yoksa kart puanları.
+    main.innerHTML = '<p class="dim">Yükleniyor…</p>';
+    fetch(`${base}/analiz.json`).then(r => (r.ok ? r.json() : null)).catch(() => null).then(x => {
+      analizler.set(h.id, x);
+      if (location.hash.slice(1) === 'son') lastMatchView();
+    });
+    return;
+  }
+  const a = analizler.get(h.id);
   const byId = new Map(db.players.map(p => [p.id, p]));
   // Eski kayıtlarda diziliş yok: pozisyonları bugünkü oyuncu bilgileriyle yeniden hesapla.
   const team = ids => ids.map(id => byId.get(id)).filter(Boolean);
   const lineup = h.lineup ?? { a: assignPositions(team(h.a), h.format), b: assignPositions(team(h.b), h.format) };
+  const vr = new Map((a?.oyuncular ?? []).map(o => [o.id, o.genel]));
+  const rate = a ? (s, p) => vr.get(s.id) ?? slotRating(s, p) : slotRating;
   const date = new Date(h.date).toLocaleDateString('tr-TR', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
   const verdict = h.scoreA === h.scoreB ? 'Berabere' : `${h.scoreA > h.scoreB ? 'Kırmızı' : 'Mavi'} kazandı`;
   main.innerHTML = `<div class="head"><div><h1>Son maç</h1><p>${date}, ${esc(h.format)}</p></div></div>
@@ -1667,21 +1697,19 @@ function lastMatchView() {
         <div class="sb-team blue"><span class="sb-score">${h.scoreB}</span><div><span class="sb-name">Mavi</span><small>${h.b.length} oyuncu</small></div></div>
       </div>
       <h2 class="sub-h">Puan karşılaştırması</h2>
-      ${scoreboard(lineup, byId).html}
+      ${a ? `<p class="hint">Maçtaki performanstan: puanlar iki kameradan ölçülen koşu verisiyle hesaplandı (aşağıda Maç analizi).</p>${videoCompareHtml(a)}` : scoreboard(lineup, byId).html}
       <div class="row"><button class="btn" id="png">Görseli indir</button></div>
       <div class="field-wrap">
-        <div class="pitch">${pitchSvg(lineup, byId, null, null, { cards: true })}</div>
-        <div class="teams">${roster(lineup, 'a', byId)}${roster(lineup, 'b', byId)}</div>
+        <div class="pitch">${pitchSvg(lineup, byId, null, null, { cards: true, rate })}</div>
+        <div class="teams">${roster(lineup, 'a', byId, null, rate)}${roster(lineup, 'b', byId, null, rate)}</div>
       </div>
     </section>
     <section id="goller"></section>
     <section id="analiz"></section>`;
   drawGoals(h, byId);
-  // Video analizi varsa (siteyle yayınlanan analiz/<maç id>/analiz.json) altına ekle; yoksa sessizce yok.
-  const base = `analiz/${h.id}`;
-  fetch(`${base}/analiz.json`).then(r => r.ok ? r.json() : null).then(a => {
+  // Video analizi varsa altına: takım/oyuncu ısı haritaları ve maç kartları.
+  if (a) {
     const yer = $('analiz');
-    if (!a || !yer) return;
     yer.innerHTML = analysisHtml(a, base, h.goals ?? []);
     const panel = $('an-panel');
     const sec = i => {
@@ -1694,9 +1722,9 @@ function lastMatchView() {
       if (k) return sec(k.getAttribute('aria-pressed') === 'true' ? null : k.dataset.an);
       if (e.target.closest('[data-an-teams]')) sec(null);
     };
-  }).catch(() => {});
+  }
   $('png').onclick = () => sharePng(
-    pitchSvg(lineup, byId, null, { a: String(h.scoreA), b: String(h.scoreB), mid: verdict, date: new Date(h.date).toLocaleDateString('tr-TR', { day: 'numeric', month: 'long' }) }, { cards: true }),
+    pitchSvg(lineup, byId, null, { a: String(h.scoreA), b: String(h.scoreB), mid: verdict, date: new Date(h.date).toLocaleDateString('tr-TR', { day: 'numeric', month: 'long' }) }, { cards: true, rate }),
     `mac-${h.date.slice(0, 10)}.png`);
 }
 
