@@ -373,6 +373,13 @@ main { padding: 28px clamp(16px, 4vw, 40px) 64px; max-width: 1280px; margin: 0 a
 .mc-stats { display: grid; grid-template-columns: 1fr 1fr; gap: 2px 14px; font-size: .78rem; font-weight: 500; letter-spacing: .04em; font-variant-numeric: tabular-nums; text-align: left; }
 .mc-stats b { display: inline-block; min-width: 1.6em; text-align: right; font-size: 1.05rem; font-weight: 700; letter-spacing: 0; }
 .mc-foot { font-size: .7rem; opacity: .8; }
+.mc-olay { font-size: .72rem; font-weight: 600; opacity: .85; }
+.adaylar { list-style: none; padding: 0; margin: 10px 0 20px; display: grid; gap: 8px; max-width: 860px; }
+.adaylar li { display: grid; grid-template-columns: 1fr auto auto; gap: 8px 12px; align-items: center; padding: 8px 12px;
+  background: var(--turf-1); border: 1px solid var(--turf-2); border-radius: 12px; }
+.adaylar video { grid-column: 1 / -1; width: 100%; border-radius: 8px; }
+.ad-sec { display: flex; gap: 6px; flex-wrap: wrap; }
+@media (max-width: 640px) { .adaylar li { grid-template-columns: 1fr auto; } .ad-sec { grid-column: 1 / -1; } }
 .mc-ga { font-weight: 700; font-size: .85rem; background: rgb(0 0 0 / .14); border-radius: 999px; padding: 1px 10px; }
 .mc-legend { display: grid; grid-template-columns: auto 1fr; gap: 4px 12px; margin: 22px 0 0; font-size: .85rem; color: var(--chalk-dim); max-width: 70ch; }
 .mc-legend dt { font-weight: 700; color: var(--chalk); } .mc-legend dd { margin: 0; }
@@ -671,6 +678,9 @@ function describeChanges(prev, next) {
     const was = (o.goals ?? []).map(goalText), now = (h.goals ?? []).map(goalText);
     for (const t of now) if (!was.includes(t)) out.push(`Gol eklendi: ${t}`);
     for (const t of was) if (!now.includes(t)) out.push(`Gol silindi: ${t}`);
+    const oa = o.onaylar ?? {}, na = h.onaylar ?? {};
+    const degisen = [...new Set([...Object.keys(oa), ...Object.keys(na)])].filter(k => oa[k] !== na[k]).length;
+    if (degisen) out.push(`Video olay onayı: ${degisen} aday işaretlendi/değişti`);
   }
   const lineupKey = m => JSON.stringify([m?.lineup?.a, m?.lineup?.b, m?.lineup?.keeperMode]);
   if (next?.match?.lineup && lineupKey(prev?.match) !== lineupKey(next.match)) {
@@ -985,7 +995,7 @@ function formationsPng(a, title) {
 
 // Puan karşılaştırması videodan: takımların maç puanı ortalaması ve ölçülen değerlerin takım ortalamaları.
 const VIDEO_ADI = { HIZ: 'Hız', PAT: 'Patlayıcılık', DAY: 'Dayanıklılık', ALN: 'Alan', 'HÜC': 'Hücum', SAV: 'Savunma' };
-function videoCompareHtml(a) {
+function videoCompareHtml(a, onay = {}) {
   const ps = t => a.oyuncular.filter(o => o.taraf === t);
   const ort = (t, f) => { const xs = ps(t).map(f); return xs.length ? xs.reduce((x, y) => x + y, 0) / xs.length : 0; };
   const A = ort('a', o => o.genel), B = ort('b', o => o.genel);
@@ -996,7 +1006,8 @@ function videoCompareHtml(a) {
       <div class="sb-mid"><b>${fmt(Math.abs(A - B))}</b><span>fark</span></div>
       <div class="sb-team blue"><span class="sb-score">${fmt(B)}</span><div><span class="sb-name">Mavi</span><small>maç puanı ortalaması</small></div></div>
     </div>
-    <div class="bars">${Object.keys(VIDEO_ADI).map(k => bar(VIDEO_ADI[k], ort('a', o => o.s[k]), ort('b', o => o.s[k]))).join('')}${bar('Toplam koşu (km)', a.takimlar.a.km, a.takimlar.b.km, x => x.toFixed(1))}${[0, 1].map(y => {
+    <div class="bars">${a.takimlar.a.olay ? [['pas', 'Pas'], ['kayip', 'Top kaybı'], ['mucadele', 'Kazanılan mücadele']].map(([k, ad]) =>
+      bar(ad, a.takimlar.a.olay[k], a.takimlar.b.olay[k])).join('') : ''}${onayliBarlar(a, onay, bar)}${Object.keys(VIDEO_ADI).map(k => bar(VIDEO_ADI[k], ort('a', o => o.s[k]), ort('b', o => o.s[k]))).join('')}${bar('Toplam koşu (km)', a.takimlar.a.km, a.takimlar.b.km, x => x.toFixed(1))}${[0, 1].map(y => {
       const t = k => ort(k, o => o.yari?.[y] ?? 0);
       return a.oyuncular.some(o => o.yari) ? bar(`${y + 1}. yarı tempo (m/dk)`, t('a'), t('b')) : '';
     }).join('')}</div>`;
@@ -1038,6 +1049,38 @@ function seasonVideoHtml(maclar, byId) {
         <td>${d == null ? '<span class="dim">–</span>' : `<span class="form-tag ${d >= 0 ? 'up' : 'down'}">${d >= 0 ? '▲' : '▼'}${Math.abs(d)}</span>`}</td>
         <td>${ort(s.km).toFixed(1)}</td><td>${s.hiz}</td></tr>`;
     }).join('')}</tbody></table></div>`;
+}
+
+// Yöneticinin onayladığı şut / korner sayıları (adaylardan). onay: { aday id: 'sut' | 'gol' | 'korner' | 'degil' }
+function onaySayilari(a, onay) {
+  const say = { a: { sut: 0, korner: 0 }, b: { sut: 0, korner: 0 } }, kisi = {};
+  for (const x of a.adaylar ?? []) {
+    const v = onay[x.id];
+    if (!v || v === 'degil' || !x.taraf) continue;
+    const k = v === 'korner' ? 'korner' : 'sut';
+    say[x.taraf][k]++;
+    if (x.kim && k === 'sut') kisi[x.kim] = (kisi[x.kim] ?? 0) + 1;
+  }
+  return { say, kisi, isaretli: Object.keys(onay).length };
+}
+function onayliBarlar(a, onay, bar) {
+  const { say, isaretli } = onaySayilari(a, onay);
+  if (!isaretli) return '';
+  return bar('Şut (onaylı)', say.a.sut, say.b.sut) + bar('Korner (onaylı)', say.a.korner, say.b.korner);
+}
+// Yönetici için: şut / gol / korner adayları, klibiyle; tek tıkla Şut / Gol / Korner / Değil.
+const ONAY = [['sut', 'Şut'], ['gol', 'Gol'], ['korner', 'Korner'], ['degil', 'Değil']];
+function onayHtml(a, onay, base) {
+  if (!a.adaylar?.length) return '';
+  const n = a.adaylar.filter(x => onay[x.id]).length;
+  return `<h2 class="sub-h">Şut, gol ve korner onayı</h2>
+    <p class="hint">Videodan otomatik bulunan adaylar (${a.adaylar.length}). Klibe bak, doğru olanı seç; şut ve korner sayıları onaylananlardan çıkar. ${n}/${a.adaylar.length} işaretlendi.</p>
+    <ol class="adaylar">${a.adaylar.map(x => `<li data-aday="${x.id}">
+      <span class="ad-ust"><b>${x.mac}</b> <span class="dim">öneri: ${x.oneri}${x.kim ? ` · ${esc(x.kim)}` : x.taraf ? ` · ${TEAM_NAME[x.taraf]}` : ''}</span></span>
+      <button class="btn quiet small" data-izle="${x.id}">▶ İzle</button>
+      <span class="ad-sec">${ONAY.map(([k, ad]) => `<button class="btn small ${onay[x.id] === k ? '' : 'quiet'}" data-onay="${k}" aria-pressed="${onay[x.id] === k}">${ad}</button>`).join('')}</span>
+      <video hidden preload="none" muted playsinline controls src="${base}/${x.klip}"></video>
+    </li>`).join('')}</ol>`;
 }
 
 // Goller: iki sütun (Kırmızı / Mavi), dakikaya göre. editable: silme düğmeleri ve gol ekleme formu.
@@ -1094,7 +1137,7 @@ function analysisHtml(a, base, goals = []) {
       <span class="mc-top"><span class="mc-ovr"><b>${o.genel}</b><span>${o.mevki}</span></span><span class="mc-team ${o.taraf}">${TEAM_NAME[o.taraf]}</span></span>
       <span class="mc-name">${esc(o.ad)}</span>
       <span class="mc-stats">${Object.entries(o.s).map(([k, v]) => `<span><b>${v}</b> ${k}</span>`).join('')}</span>
-      ${sayi(o.id)}<span class="mc-foot">${o.km.toFixed(1)} km · ${o.kmh} km/s${o.az ? ' · az görüntü' : ''}</span>
+      ${sayi(o.id)}${o.olay ? `<span class="mc-olay">${o.olay.pas} pas · ${o.olay.kayip} kayıp · ${o.olay.kapma} kapma</span>` : ''}<span class="mc-foot">${o.km.toFixed(1)} km · ${o.kmh} km/s${o.kalede ? ` · kalede ${o.kalede} dk` : ''}${o.az ? ' · az görüntü' : ''}</span>
     </button>`;
   return `<h2 class="sub-h">Maç analizi</h2>
     <p class="hint">İki kameradan otomatik ölçüldü: ${Math.round(a.mac_dk)} dakika, devre arası ${Math.round(a.devre_arasi_dk)}. dakikada. Isı haritalarında takımın kendi kalesi hep solda. Bir karta bas: o oyuncunun ısı haritası görünür. Pas, şut ve top tekniği ölçülmedi.</p>
@@ -1110,7 +1153,7 @@ function analysisHtml(a, base, goals = []) {
     </dl>`;
 }
 
-if (typeof module !== 'undefined') module.exports = { card, pitchSvg, scoreboard, roster, standingsTable, historyList, staticSections, staticPage, analysisHtml, analysisTeamsHtml, analysisPlayerHtml, goalsHtml, videoCompareHtml, formationsHtml, formationsPng, motm, motmHtml, seasonVideoHtml };
+if (typeof module !== 'undefined') module.exports = { card, pitchSvg, scoreboard, roster, standingsTable, historyList, staticSections, staticPage, analysisHtml, analysisTeamsHtml, analysisPlayerHtml, goalsHtml, videoCompareHtml, formationsHtml, formationsPng, motm, motmHtml, seasonVideoHtml, onayHtml, onaySayilari };
 </script>
   <script>/* cloud.js */
 // Supabase ortak veri bağlantısı. URL ve anahtar boşsa uygulama bu cihazda (localStorage) çalışır.
@@ -1844,7 +1887,7 @@ function lastMatchView() {
       </div>
       ${a ? motmHtml(a, h) : ''}
       <h2 class="sub-h">Puan karşılaştırması</h2>
-      ${a ? `<p class="hint">Maçtaki performanstan: puanlar iki kameradan ölçülen koşu verisiyle hesaplandı (aşağıda Maç analizi).</p>${videoCompareHtml(a)}` : scoreboard(lineup, byId).html}
+      ${a ? `<p class="hint">Maçtaki performanstan: puanlar iki kameradan ölçülen koşu verisiyle hesaplandı (aşağıda Maç analizi).</p>${videoCompareHtml(a, h.onaylar ?? {})}` : scoreboard(lineup, byId).html}
       ${a?.oyuncular?.some(o => o.konum) ? formationsHtml(a) : ''}
       <div class="row"><button class="btn" id="png">Görseli indir</button></div>
       ${a?.oyuncular?.some(o => o.konum) ? '' : `<div class="field-wrap">
@@ -1853,8 +1896,33 @@ function lastMatchView() {
       </div>`}
     </section>
     <section id="goller"></section>
+    <section id="onay"></section>
     <section id="analiz"></section>`;
   drawGoals(h, byId);
+  // Yönetici: şut / gol / korner adaylarını onaylar (maç kaydında h.onaylar)
+  if (a && !READONLY) {
+    const yer = $('onay');
+    yer.innerHTML = onayHtml(a, h.onaylar ?? {}, base);
+    yer.onclick = e => {
+      const li = e.target.closest('[data-aday]');
+      if (!li) return;
+      const id = li.dataset.aday;
+      if (e.target.dataset.izle != null) {
+        const v = li.querySelector('video');
+        v.hidden = !v.hidden;
+        if (!v.hidden) v.play().catch(() => {});
+        return;
+      }
+      const k = e.target.dataset.onay;
+      if (!k) return;
+      h.onaylar = { ...(h.onaylar ?? {}) };
+      if (h.onaylar[id] === k) delete h.onaylar[id]; else h.onaylar[id] = k;
+      save();
+      li.querySelectorAll('[data-onay]').forEach(b => { const on = b.dataset.onay === h.onaylar[id]; b.classList.toggle('quiet', !on); b.setAttribute('aria-pressed', String(on)); });
+      const bilgi = yer.querySelector('.hint');
+      if (bilgi) bilgi.textContent = bilgi.textContent.replace(/\d+\/(\d+) işaretlendi/, `${a.adaylar.filter(x => h.onaylar[x.id]).length}/$1 işaretlendi`);
+    };
+  }
   // Video analizi varsa altına: takım/oyuncu ısı haritaları ve maç kartları.
   if (a) {
     const yer = $('analiz');
@@ -1961,7 +2029,11 @@ function parseBackup(text) {
   for (const p of d.players) if (!(Number.isFinite(p.form) && Math.abs(p.form) <= 10)) delete p.form;
   const history = Array.isArray(d.history) ? d.history.filter(h =>
     h && typeof h.id === 'string' && Array.isArray(h.a) && Array.isArray(h.b)
-    && Number.isInteger(h.scoreA) && Number.isInteger(h.scoreB)).map(h => (h.goals ? { ...h, goals: cleanGoals(h) } : h)) : [];
+    && Number.isInteger(h.scoreA) && Number.isInteger(h.scoreB)).map(h => {
+      const x = h.goals ? { ...h, goals: cleanGoals(h) } : { ...h };
+      if (h.onaylar) x.onaylar = Object.fromEntries(Object.entries(h.onaylar).filter(([, v]) => ['sut', 'gol', 'korner', 'degil'].includes(v)));
+      return x;
+    }) : [];
   if (!history.some(h => h.id === m.resultId)) m.resultId = null;
   return { players: d.players, match: m, history, scale: 100, ...(typeof d.savedAt === 'string' ? { savedAt: d.savedAt } : {}) };
 }
