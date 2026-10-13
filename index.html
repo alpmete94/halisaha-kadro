@@ -1870,6 +1870,7 @@ function drawResult() {
 }
 
 // ---------------- Son maç ----------------
+const OLAY_GOSTER = false; // pas/şut/dribling yönetici bölümü: Mete gizlemesini istedi (2026-10-13); açmak için true
 const analizler = new Map(); // maç kaydı id -> video analizi (yoksa null); bir kez okunur
 const analizGetir = id => (analizler.has(id) ? Promise.resolve(analizler.get(id))
   : fetch(`analiz/${id}/analiz.json`).then(r => (r.ok ? r.json() : null)).catch(() => null).then(x => (analizler.set(id, x), x)));
@@ -1920,7 +1921,7 @@ function lastMatchView() {
     <section id="analiz"></section>`;
   drawGoals(h, byId);
   // Yönetici: pas / şut / dribling (sunucuda yalnızca yönetici kodu okuyabilir; herkese açık analiz.json'da yok)
-  if (useCloud && role === 'admin') cloud.rpc('mac_olay_oku', { p_code: storedCode(), p_mac: h.id })
+  if (OLAY_GOSTER && useCloud && role === 'admin') cloud.rpc('mac_olay_oku', { p_code: storedCode(), p_mac: h.id })
     .then(r => { const y = $('olay'); if (y && r?.ok && r.veri) y.innerHTML = olayYoneticiHtml(r.veri); }).catch(() => {});
   // Yönetici: şut / gol / korner adaylarını onaylar (maç kaydında h.onaylar)
   if (a && !READONLY) {
