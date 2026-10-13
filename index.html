@@ -303,6 +303,9 @@ main { padding: 28px clamp(16px, 4vw, 40px) 64px; max-width: 1280px; margin: 0 a
 .standings .pts { font-family: var(--display); font-weight: 900; font-size: 1.3rem; color: var(--flood); }
 .standings tbody tr:first-child .pts { text-shadow: 0 0 14px rgb(255 231 163 / .45); }
 .standings tr.idle { opacity: .5; }
+.standings.olay td:first-child { color: inherit; width: auto; }
+.olay tr.tot td { font-weight: 700; background: rgb(255 231 163 / .06); }
+.olay-liste { list-style: none; padding: 0; margin: 0 0 8px; display: grid; gap: 4px; font-size: .9rem; }
 .matches { list-style: none; padding: 0; margin: 0; display: grid; gap: 10px; max-width: 760px; }
 .matches li { display: grid; gap: 6px; padding: 12px 16px; background: var(--turf-1); border: 1px solid var(--turf-2); border-radius: 14px; }
 .m-top { display: flex; justify-content: space-between; align-items: center; gap: 8px; font-size: .85rem; }
@@ -1153,7 +1156,23 @@ function analysisHtml(a, base, goals = []) {
     </dl>`;
 }
 
-if (typeof module !== 'undefined') module.exports = { card, pitchSvg, scoreboard, roster, standingsTable, historyList, staticSections, staticPage, analysisHtml, analysisTeamsHtml, analysisPlayerHtml, goalsHtml, videoCompareHtml, formationsHtml, formationsPng, motm, motmHtml, seasonVideoHtml, onayHtml, onaySayilari };
+// Yönetici: pas / şut / dribling (mac_olay tablosu; yalnızca yönetici okuyabilir). v: { not, guven: {pas: 85, ...}, takim: {a, b}, oyuncular: [...], sutlar: [...] }
+const OLAY_SUTUN = [['pas', 'Pas'], ['kayip', 'Top kaybı'], ['kapma', 'Kapma'], ['sut', 'Şut'], ['dribling', 'Dribling']];
+function olayYoneticiHtml(v) {
+  const takim = { a: 'Kırmızı', b: 'Mavi' };
+  const head = `<tr><th class="l">Oyuncu</th><th>Takım</th>${OLAY_SUTUN.map(([, ad]) => `<th>${ad}</th>`).join('')}</tr>`;
+  const satir = (ad, t, o, kalin) => `<tr${kalin ? ' class="tot"' : ''}><td class="l">${esc(ad)}</td><td>${esc(t)}</td>${OLAY_SUTUN.map(([k]) => `<td>${o[k] ?? 0}</td>`).join('')}</tr>`;
+  const ps = [...v.oyuncular].sort((x, y) => x.taraf.localeCompare(y.taraf) || (y.pas ?? 0) - (x.pas ?? 0));
+  const guven = Object.entries(v.guven ?? {}).map(([k, d]) => `${(OLAY_SUTUN.find(s => s[0] === k) ?? [k, k])[1]} %${d}`).join(' · ');
+  return `<h2 class="sub-h">Pas, şut, dribling <span class="dim">(yalnızca yönetici)</span></h2>
+    <p class="hint">${esc(v.not ?? 'Videodan otomatik bulundu.')}${guven ? ` Doğruluk (el ile doğrulanan örnek): ${esc(guven)}.` : ''}</p>
+    <div class="table-wrap"><table class="standings olay">${head}
+      ${satir('Kırmızı', '', v.takim.a, true)}${satir('Mavi', '', v.takim.b, true)}
+      ${ps.map(o => satir(o.ad, takim[o.taraf], o)).join('')}</table></div>
+    ${v.sutlar?.length ? `<h3 class="sub-h">Şut adayları</h3><ul class="olay-liste">${v.sutlar.map(s => `<li><b>${esc(s.t)}</b> ${esc(s.kim)} <span class="dim">${takim[s.taraf] ?? ''}${s.hiz ? `, ${s.hiz} km/s` : ''}</span></li>`).join('')}</ul>` : ''}`;
+}
+
+if (typeof module !== 'undefined') module.exports = { olayYoneticiHtml, card, pitchSvg, scoreboard, roster, standingsTable, historyList, staticSections, staticPage, analysisHtml, analysisTeamsHtml, analysisPlayerHtml, goalsHtml, videoCompareHtml, formationsHtml, formationsPng, motm, motmHtml, seasonVideoHtml, onayHtml, onaySayilari };
 </script>
   <script>/* cloud.js */
 // Supabase ortak veri bağlantısı. URL ve anahtar boşsa uygulama bu cihazda (localStorage) çalışır.
@@ -1887,7 +1906,7 @@ function lastMatchView() {
       </div>
       ${a ? motmHtml(a, h) : ''}
       <h2 class="sub-h">Puan karşılaştırması</h2>
-      ${a ? `<p class="hint">Maçtaki performanstan: puanlar iki kameradan ölçülen koşu verisiyle hesaplandı (aşağıda Maç analizi).</p>${videoCompareHtml(a, h.onaylar ?? {})}` : scoreboard(lineup, byId).html}
+      ${a ? `<p class="hint">Maçtaki performanstan: puanlar kameradan ölçülen koşu verisiyle hesaplandı (aşağıda Maç analizi).</p>${videoCompareHtml(a, h.onaylar ?? {})}` : scoreboard(lineup, byId).html}
       ${a?.oyuncular?.some(o => o.konum) ? formationsHtml(a) : ''}
       <div class="row"><button class="btn" id="png">Görseli indir</button></div>
       ${a?.oyuncular?.some(o => o.konum) ? '' : `<div class="field-wrap">
@@ -1897,8 +1916,12 @@ function lastMatchView() {
     </section>
     <section id="goller"></section>
     <section id="onay"></section>
+    <section id="olay"></section>
     <section id="analiz"></section>`;
   drawGoals(h, byId);
+  // Yönetici: pas / şut / dribling (sunucuda yalnızca yönetici kodu okuyabilir; herkese açık analiz.json'da yok)
+  if (useCloud && role === 'admin') cloud.rpc('mac_olay_oku', { p_code: storedCode(), p_mac: h.id })
+    .then(r => { const y = $('olay'); if (y && r?.ok && r.veri) y.innerHTML = olayYoneticiHtml(r.veri); }).catch(() => {});
   // Yönetici: şut / gol / korner adaylarını onaylar (maç kaydında h.onaylar)
   if (a && !READONLY) {
     const yer = $('onay');
