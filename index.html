@@ -482,8 +482,17 @@ function* combinations(n, k, start = 0, picked = []) {
 const positionGaps = (team, format) => OUTFIELD.reduce((s, pos) =>
   s + Math.max(0, (FORMATIONS[format][pos] ?? 0) - team.filter(p => p.positions.includes(pos)).length), 0);
 
+// Takım başına yer sayısı. Değişkenli kalecide kaleci yeri yok, fazladan orta saha var.
+function slotCounts(format, mode) {
+  const c = { ...FORMATIONS[format] };
+  if (mode === 'rotating') { c.GK = 0; c.MID += 1; }
+  return c;
+}
+
+const lockedKeeper = team => team.find(p => p.posLock === 'GK')?.id;
+
 function cost(a, b, format, mode, naturalKeepers) {
-  const ta = teamTotals(a, mode), tb = teamTotals(b, mode);
+  const ta = teamTotals(a, mode, lockedKeeper(a)), tb = teamTotals(b, mode, lockedKeeper(b));
   // Önce toplam güç eşitlenir; hücum/savunma dengesi (özellik başına ortalama fark) ikincil ölçüttür.
   // Yoksa zayıf kaleyi güçlü forvetle telafi etmek "hücum farkı" diye cezalanır, dengesiz bölme seçilirdi.
   // /10: 100'lük ölçekte de pozisyon cezası (1) ve kaleci cezası (100) aynı ağırlıkta kalır.
@@ -500,9 +509,14 @@ function cost(a, b, format, mode, naturalKeepers) {
 }
 
 // ponytail: tüm bölmeler denenir; 20 kişiye kadar anlık (C(20,10)/2 ≈ 92 bin). Daha kalabalık grup olursa yerel arama.
-function splitTeams(players, format, { together = [], apart = [] } = {}, mode = 'fixed') {
+// pos: [[oyuncu id, mevki]] — mevki kilidi. Oyuncu o maçta yalnız o mevkide sayılır ve dizilişte oraya konur;
+// bir takıma o mevkinin yer sayısından fazla kilitli oyuncu düşen bölmeler atlanır.
+function splitTeams(players, format, { together = [], apart = [], pos = [] } = {}, mode = 'fixed') {
   if (players.length < 2) return [];
-  players = players.map(withDefaults);
+  const locked = new Map(pos);
+  players = players.map(p => withDefaults(locked.has(p.id) ? { ...p, positions: [locked.get(p.id)], posLock: locked.get(p.id) } : p));
+  const slots = slotCounts(format, mode);
+  const fits = team => Object.keys(slots).every(k => team.filter(p => p.posLock === k).length <= slots[k]);
   const n = players.length, k = Math.floor(n / 2);
   const naturalKeepers = players.filter(p => p.positions.includes('GK')).length;
   const results = [];
@@ -512,6 +526,7 @@ function splitTeams(players, format, { together = [], apart = [] } = {}, mode = 
     if (together.some(([x, y]) => inA.has(x) !== inA.has(y))) continue;
     if (apart.some(([x, y]) => inA.has(x) === inA.has(y))) continue;
     const a = players.filter(p => inA.has(p.id)), b = players.filter(p => !inA.has(p.id));
+    if (!fits(a) || !fits(b)) continue;
     results.push({ a, b, cost: cost(a, b, format, mode, naturalKeepers) });
   }
   return results.sort((x, y) => x.cost - y.cost);
@@ -532,10 +547,11 @@ function balancedChoices(splits, slack, rand = Math.random) {
 function assignPositions(team, format, mode = 'fixed') {
   const left = team.map(withDefaults);
   const out = [];
+  const counts = slotCounts(format, mode);
   const take = (p, pos) => { left.splice(left.indexOf(p), 1); out.push({ id: p.id, pos }); };
-  if (mode === 'fixed' && left.length) take(pickKeeper(left), 'GK');
-  const counts = { ...FORMATIONS[format] };
-  if (mode === 'rotating') counts.MID += 1;
+  // Mevki kilitliler önce yerine konur (splitTeams yer sayısını aşmamayı garanti eder).
+  for (const p of left.filter(p => counts[p.posLock] > 0)) { take(p, p.posLock); counts[p.posLock]--; }
+  if (counts.GK > 0 && left.length) take(pickKeeper(left), 'GK');
   const slots = OUTFIELD.flatMap(pos => Array(counts[pos] ?? 0).fill(pos));
   const open = [];
   // Önce tercihe göre: en az pozisyon seçmiş olan (en kısıtlı) öncelikli.
@@ -1223,7 +1239,7 @@ const SAMPLE = [
 ];
 const fresh = () => ({
   players: SAMPLE.map(([name, positions, ...v]) => ({ id: newId(), name, positions, ...Object.fromEntries(ATTRS.map((k, i) => [k, v[i] * 10])) })),
-  match: { format: '6v6', coming: [], locks: { together: [], apart: [] }, lineup: null },
+  match: { format: '6v6', coming: [], locks: { together: [], apart: [], pos: [] }, lineup: null },
   history: [], // kaydedilen maç sonuçları
   scale: 100,  // puanlar 100 üzerinden
 });
@@ -1640,6 +1656,7 @@ function editView(id) {
     m.coming = m.coming.filter(x => x !== id);
     m.locks.together = m.locks.together.filter(l => !l.includes(id));
     m.locks.apart = m.locks.apart.filter(l => !l.includes(id));
+    m.locks.pos = m.locks.pos.filter(l => l[0] !== id);
     if (m.lineup && [...m.lineup.a, ...m.lineup.b].some(s => s.id === id)) m.lineup = null;
     save();
     toast(`${p.name} silindi.`);
@@ -1701,6 +1718,11 @@ function matchView() {
           <select name="kind" class="kind" aria-label="Kilit türü"><option value="together">aynı takımda oynasın</option><option value="apart">ayrı takımlarda oynasın</option></select>
           <button class="btn quiet small">Kilit ekle</button>
         </form>
+        <form id="poslock" class="lock-form">
+          <select name="x" aria-label="Oyuncu">${opts}</select>
+          <select name="pos" aria-label="Mevki">${['GK', ...OUTFIELD].map(k => `<option value="${k}">${POS_TR[k]}</option>`).join('')}</select>
+          <button class="btn quiet small">Mevki kilitle</button>
+        </form>
         <ul class="locks" id="locks"></ul>
       </section>
       <section>
@@ -1730,6 +1752,7 @@ function matchView() {
     const items = [
       ...m.locks.together.map((l, i) => [`${name(l[0])} ile ${name(l[1])} aynı takımda`, 'together', i]),
       ...m.locks.apart.map((l, i) => [`${name(l[0])} ile ${name(l[1])} ayrı takımlarda`, 'apart', i]),
+      ...m.locks.pos.map((l, i) => [`${name(l[0])} ${POS_TR[l[1]]} oynasın`, 'pos', i]),
     ];
     $('locks').innerHTML = items.map(([t, k, i]) =>
       `<li><span>${t}</span><button class="btn quiet small" data-k="${k}" data-i="${i}">Kaldır</button></li>`).join('');
@@ -1757,6 +1780,13 @@ function matchView() {
     saveMatch();
     drawLocks();
   };
+  $('poslock').onsubmit = e => {
+    e.preventDefault();
+    const fd = new FormData(e.target);
+    m.locks.pos = [...m.locks.pos.filter(l => l[0] !== fd.get('x')), [fd.get('x'), fd.get('pos')]]; // oyuncu başına tek mevki
+    saveMatch();
+    drawLocks();
+  };
   $('build').onclick = build;
   count();
   drawLocks();
@@ -1769,10 +1799,15 @@ function build() {
   // Gelmeyen oyuncuyu içeren kilit yok sayılır.
   const here = l => l.every(id => m.coming.includes(id));
   // En dengeliye yakın bölmeler karışık sırayla: her kurulumda farklı takımlar.
-  splits = balancedChoices(splitTeams(coming, m.format, { together: m.locks.together.filter(here), apart: m.locks.apart.filter(here) },
-    m.keeperMode ?? 'fixed'), SLACK);
+  const pos = m.locks.pos.filter(l => m.coming.includes(l[0]));
+  const mode = m.keeperMode ?? 'fixed';
+  splits = balancedChoices(splitTeams(coming, m.format, { together: m.locks.together.filter(here), apart: m.locks.apart.filter(here), pos },
+    mode), SLACK);
   si = 0;
-  note = coming.length < 2 ? 'Takım kurmak için en az 2 kişi seç.' : splits.length ? '' : 'Bu kilitlerle dengeli bölme yok. Bir kilidi kaldırıp tekrar dene.';
+  note = coming.length < 2 ? 'Takım kurmak için en az 2 kişi seç.'
+    : splits.length ? ''
+    : mode === 'rotating' && pos.some(l => l[1] === 'GK') ? 'Değişkenli kalecide kaleci kilidi olmaz. Kilidi kaldır ya da Sabit kaleci seç.'
+    : 'Bu kilitlerle dengeli bölme yok. Bir kilidi kaldırıp tekrar dene.';
   pick();
 }
 
@@ -2047,7 +2082,8 @@ function parseBackup(text) {
   const m = d.match && typeof d.match === 'object' ? d.match : fresh().match;
   m.format = FORMATIONS[m.format] ? m.format : '6v6';
   m.coming = Array.isArray(m.coming) ? m.coming.filter(id => ids.has(id)) : [];
-  m.locks = { together: m.locks?.together ?? [], apart: m.locks?.apart ?? [] };
+  m.locks = { together: m.locks?.together ?? [], apart: m.locks?.apart ?? [],
+    pos: (m.locks?.pos ?? []).filter(l => Array.isArray(l) && ids.has(l[0]) && ['GK', ...OUTFIELD].includes(l[1])) };
   const slotsOk = l => Array.isArray(l) && l.every(s => ids.has(s?.id) && (SHORT[s.pos]));
   if (!(m.lineup && slotsOk(m.lineup.a) && slotsOk(m.lineup.b))) m.lineup = null;
   for (const p of d.players) if (!(Number.isFinite(p.form) && Math.abs(p.form) <= 10)) delete p.form;
