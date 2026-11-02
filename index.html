@@ -131,6 +131,15 @@ main { padding: 28px clamp(16px, 4vw, 40px) 64px; max-width: 1280px; margin: 0 a
 .slider { display: grid; grid-template-columns: 96px 1fr 42px; align-items: center; gap: 12px; }
 .slider input { accent-color: var(--flood); width: 100%; }
 .slider output { font-family: var(--display); font-weight: 900; font-size: 1.4rem; text-align: right; }
+.subs { margin: -4px 0 4px; padding-left: 12px; border-left: 2px solid var(--turf-2); }
+.subs summary { cursor: pointer; font-size: .78rem; color: var(--chalk-dim); }
+.subs[open] summary { margin-bottom: 6px; }
+.subs .slider span { font-size: .85rem; color: var(--chalk-dim); }
+.subs .slider output { font-size: 1.1rem; }
+.pos-ratings { display: flex; flex-wrap: wrap; gap: 4px 12px; justify-content: center; margin: 10px 0 0; font-size: .8rem; color: var(--chalk-dim); }
+.pos-ratings .on { color: var(--chalk); font-weight: 600; }
+.pos-ratings b { font-family: var(--display); font-weight: 900; font-size: 1rem; }
+.fut-styles { grid-column: 1 / -1; justify-self: center; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-height: 1.2em; line-height: 1.2; font-size: .68rem; font-weight: 700; letter-spacing: .02em; opacity: .85; margin-top: 2px; }
 .group-label { font-size: .85rem; color: var(--chalk-dim); margin-top: 6px; }
 
 /* ---------- Maç ---------- */
@@ -429,17 +438,86 @@ const FIT = {
   MID: p => p.pass + p.dribble, FWD: p => p.shot + p.pace,
 };
 
-// Puanlar 1–100 arası. Girilmemiş özellik 50 sayılır.
-const withDefaults = p => ({
-  ...p,
-  positions: p.positions ?? [],
-  ...Object.fromEntries(ATTRS.map(k => [k, p[k] ?? 50])),
-});
+// ---------------- Alt özellikler ve mevki puanı (FIFA gibi) ----------------
+// Her saha özelliği, alt özelliklerinin ağırlıklı ortalamasıdır (kartta görünen ana puan). Kalecilik tek puan.
+const SUBS = {
+  pace: { accel: 0.6, sprint: 0.4 },
+  shot: { finishing: 0.5, shotPower: 0.3, positioning: 0.2 },
+  pass: { shortPass: 0.5, vision: 0.3, longPass: 0.2 },
+  dribble: { control: 0.4, dribbling: 0.4, agility: 0.2 },
+  defense: { marking: 0.35, tackling: 0.35, press: 0.3 },
+  physical: { stamina: 0.5, strength: 0.5 },
+};
+const SUB_TR = {
+  accel: 'Hızlanma', sprint: 'Sprint', finishing: 'Bitiricilik', shotPower: 'Şut gücü', positioning: 'Pozisyon alma',
+  shortPass: 'Kısa pas', vision: 'Oyun görüşü', longPass: 'Uzun pas', control: 'Top kontrolü', dribbling: 'Çalım', agility: 'Çeviklik',
+  marking: 'Markaj', tackling: 'Top kapma', press: 'Pres', stamina: 'Kondisyon', strength: 'Güç',
+};
+const PARENT = Object.fromEntries(Object.entries(SUBS).flatMap(([f, s]) => Object.keys(s).map(k => [k, f])));
+// Mevkiye göre genel puan: alt özellik ağırlıkları (kalecide ana özellik). Her satırın toplamı 1.
+// Pres savunma puanında bir kez sayılır; forvet ve orta sahanın mevki puanına da girer (önde savunma).
+const BACK = { stamina: 0.15, marking: 0.15, tackling: 0.15, accel: 0.1, sprint: 0.1, shortPass: 0.1, press: 0.05, control: 0.05, dribbling: 0.05, strength: 0.05, vision: 0.05 };
+const POS_W = {
+  GK: { goalkeeping: 0.75, pass: 0.15, physical: 0.1 },
+  CB: { marking: 0.25, tackling: 0.25, strength: 0.15, shortPass: 0.1, accel: 0.05, sprint: 0.05, stamina: 0.05, press: 0.05, control: 0.05 },
+  LB: BACK, RB: BACK,
+  MID: { shortPass: 0.2, vision: 0.15, control: 0.15, stamina: 0.1, press: 0.1, tackling: 0.05, dribbling: 0.05, longPass: 0.05, shotPower: 0.05, accel: 0.05, strength: 0.05 },
+  FWD: { finishing: 0.25, positioning: 0.15, shotPower: 0.1, accel: 0.1, control: 0.1, dribbling: 0.1, sprint: 0.05, press: 0.05, shortPass: 0.05, strength: 0.05 },
+};
+// Oyun tarzı rozetleri: kartta görünür, puanı etkilemez.
+const STYLES = {
+  hizli: 'Hızlı', bitirici: 'Bitirici', duvar: 'Duvar', joga: 'Joga Bonito', pasmerkezi: 'Pas Merkezi',
+  pres: 'Pres Makinesi', motor: 'Motor', fuze: 'Füze', tank: 'Tank', orumcek: 'Örümcek',
+};
+const STYLE_INFO = {
+  hizli: 'Hızıyla fark yaratır', bitirici: 'Pozisyonu gole çevirir', duvar: 'Savunmada geçit vermez', joga: 'Çalımcı, gösterişli',
+  pasmerkezi: 'Oyun ondan geçer', pres: 'Önde baskı, geri koşu', motor: 'Yorulmaz', fuze: 'Uzaktan sert şut',
+  tank: 'Güçlü, topu saklar', orumcek: 'Refleks kalecisi',
+};
+
+const clamp100 = x => Math.max(1, Math.min(100, Math.round(x)));
+const faceOf = (sub, f) => clamp100(Object.entries(SUBS[f]).reduce((s, [k, w]) => s + w * sub[k], 0));
+const posRating = (p, pos) => Object.entries(POS_W[pos]).reduce((s, [k, w]) => s + w * (p.sub[k] ?? p[k]), 0);
+const fieldAvg = p => [...ATTACK, ...DEFENSE].reduce((s, k) => s + p[k], 0) / 6;
+// Mevki genel puanı. Saha mevkilerinde karma: yarısı mevki formülü, yarısı 6 saha özelliğinin ortalaması
+// (halı sahada herkes hem hücum hem savunma yapar; saf FIFA formülü uzmanları fazla şişiriyordu). Kaleci saf formül.
+const posOverall = (p, pos) => (pos === 'GK' ? posRating(p, 'GK') : (posRating(p, pos) + fieldAvg(p)) / 2);
+// Saha puanı (takım gücü): kartındaki saha mevkilerinin en iyisindeki mevki puanı; saha mevkisi seçilmemişse
+// 6 saha özelliğinin ortalaması. Kalecilik takım gücüne ayrıca girer (teamTotals).
+const rating = p => {
+  const field = p.positions.filter(x => x !== 'GK' && POS_W[x]);
+  return field.length ? Math.max(...field.map(x => posOverall(p, x))) : fieldAvg(p);
+};
+// Kartta görünen puan: kaleci tercih edenin kaleci puanı da hesaba girer (FIFA'daki gibi en iyi mevkisi). p: withDefaults'lu.
+const cardRating = p => Math.max(p.rating, p.positions.includes('GK') ? posOverall(p, 'GK') : -Infinity) + (p.form ?? 0);
+
+// Puanlar 1–100 arası. Girilmemiş özellik 50, girilmemiş alt özellik ana puanı sayılır.
+const withDefaults = p => {
+  const q = { ...p, positions: p.positions ?? [], ...Object.fromEntries(ATTRS.map(k => [k, p[k] ?? 50])) };
+  q.sub = Object.fromEntries(Object.keys(PARENT).map(k => [k, p.sub?.[k] ?? q[PARENT[k]]]));
+  q.rating = rating(q);
+  return q;
+};
+
+// Başka cihazdaki eski sürüm ana puanı değiştirmişse alt özellikler o kadar kaydırılır; ana puan her zaman alt özelliklerden gelir.
+// Girdiyi yerinde değiştirir; tekrar çağrılması zararsız.
+function syncSubs(d) {
+  for (const p of d.players ?? []) {
+    if (!p.sub) continue;
+    for (const f of Object.keys(SUBS)) {
+      const sub = Object.fromEntries(Object.keys(SUBS[f]).map(k => [k, p.sub[k] ?? p[f] ?? 50]));
+      const shift = (p[f] ?? 50) - faceOf(sub, f);
+      for (const k in sub) p.sub[k] = clamp100(sub[k] + shift);
+      p[f] = faceOf(p.sub, f);
+    }
+  }
+  return d;
+}
 
 const sumOf = (ps, keys) => ps.reduce((s, p) => s + keys.reduce((t, k) => t + p[k], 0), 0);
 const round1 = x => Math.round(x * 10) / 10;
-// Genel puan: 6 saha özelliğinin ortalaması + maç sonuçlarından gelen form.
-const overall = p => sumOf([p], [...ATTACK, ...DEFENSE]) / 6 + (p.form ?? 0);
+// Genel puan: kart puanı (mevkiye göre) + maç sonuçlarından gelen form.
+const overall = p => (p.rating ?? withDefaults(p).rating) + (p.form ?? 0);
 
 // Sabit kaleci: önce kaleciliği tercih edenler, yoksa defanslar (stoper/bek), sonra kartında mevki seçilmemiş olanlar, en son herkes;
 // her grupta kalecilik puanı yüksek olan; eşitse genel puanı DÜŞÜK olan (takımın gücü kaleye harcanmasın).
@@ -730,8 +808,16 @@ function describeChanges(prev, next) {
     const o = before.get(p.id);
     if (!o) { out.push(`${p.name} eklendi`); continue; }
     if (o.name !== p.name) out.push(`${o.name} → ${p.name} (ad)`);
-    const attrs = ATTRS.filter(k => o[k] !== p[k]).map(k => `${ATTR_TR[k]} ${o[k]}→${p[k]}`);
+    // Ana puan değişince alt özellikler hep birlikte kayar; yalnız farklı oranda değişen alt özellikler ayrıca yazılır.
+    const subOf = (x, k) => x.sub?.[k] ?? x[PARENT[k]];
+    const attrs = ATTRS.flatMap(k => {
+      const subs = Object.keys(SUBS[k] ?? {}), ds = subs.map(s => subOf(p, s) - subOf(o, s));
+      return [...(o[k] !== p[k] ? [`${ATTR_TR[k]} ${o[k]}→${p[k]}`] : []),
+        ...(ds.some(d => d !== ds[0]) ? subs.filter((_, i) => ds[i]).map(s => `${SUB_TR[s]} ${subOf(o, s)}→${subOf(p, s)}`) : [])];
+    });
     if (attrs.length) out.push(`${p.name}: ${attrs.join(', ')}`);
+    const styleText = x => (x.styles ?? []).map(k => STYLES[k] ?? k).join(', ') || '—';
+    if (styleText(o) !== styleText(p)) out.push(`${p.name}: rozet ${styleText(o)} → ${styleText(p)}`);
     if (posText(o) !== posText(p)) out.push(`${p.name}: pozisyon ${posText(o)} → ${posText(p)}`);
   }
   for (const o of prev?.players ?? []) if (!after.has(o.id)) out.push(`${o.name} silindi`);
@@ -759,7 +845,7 @@ function describeChanges(prev, next) {
 }
 
 if (typeof module !== 'undefined') {
-  module.exports = { ATTACK, DEFENSE, ATTRS, FORMATIONS, withDefaults, overall, teamTotals, splitTeams, balancedChoices, assignPositions, swap,
+  module.exports = { SUBS, SUB_TR, PARENT, POS_W, STYLES, STYLE_INFO, faceOf, cardRating, posOverall, posRating, syncSubs, ATTACK, DEFENSE, ATTRS, FORMATIONS, withDefaults, overall, teamTotals, splitTeams, balancedChoices, assignPositions, swap,
     applyResult, revertResult, standings, toScale100, pickKeeper, migratePositions, DEF_POS, describeChanges, cleanGoals, dkText };
 }
 </script>
@@ -769,12 +855,12 @@ if (typeof module !== 'undefined') {
 const SHORT = { GK: 'KL', LB: 'SLB', CB: 'STP', RB: 'SĞB', DEF: 'DEF', MID: 'OS', FWD: 'FV', SUB: 'YDK' };
 const CARD_LABEL = { shot: 'ŞUT', pass: 'PAS', dribble: 'TOP', pace: 'HIZ', defense: 'SAV', physical: 'FİZ', goalkeeping: 'KAL' };
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => `&#${c.charCodeAt(0)};`);
-const ovr = p => overall(withDefaults(p));
+const ovr = p => cardRating(withDefaults(p));
 // Puanlar 100 üzerinden, FIFA gibi tam sayı gösterilir.
 const fmt = n => String(Math.round(n));
 // Maç sonuçlarından gelen form: ▲0.3 / ▼0.2
-// Kalede duran için gösterilen puan kalecilik puanıdır (takım gücü de öyle hesaplanır).
-const slotRating = (s, p) => (s.pos === 'GK' ? withDefaults(p).goalkeeping : ovr(p));
+// Sahada gösterilen puan: oyuncunun o yerdeki mevki puanı (+ form). Kendi mevkisi dışında oynayan daha düşük görünür.
+const slotRating = (s, p) => { const q = withDefaults(p); return POS_W[s.pos] ? posOverall(q, s.pos) + (q.form ?? 0) : cardRating(q); };
 const formTag = f => f
   ? `<span class="form-tag ${f > 0 ? 'up' : 'down'}" title="Maç sonuçlarından gelen form">${f > 0 ? '▲' : '▼'}${Math.round(Math.abs(f))}</span>`
   : '';
@@ -793,6 +879,7 @@ function card(p, attrs = '') {
     </span>
     <span class="fut-mono" aria-hidden="true">${esc(p.name.trim().charAt(0).toLocaleUpperCase('tr'))}</span>
     <span class="fut-name">${esc(p.name)}</span>
+    <span class="fut-styles" title="${(p.styles ?? []).map(k => esc(STYLES[k] ?? k)).join(', ')}">${(p.styles ?? []).map(k => esc(STYLES[k] ?? k)).join(' · ')}</span>
     <dl class="fut-stats">${stats}</dl>
     <span class="fut-gk">${CARD_LABEL.goalkeeping} <b>${p.goalkeeping}</b></span>
   </button>`;
@@ -1299,7 +1386,7 @@ const fresh = () => ({
 });
 const history = () => (db.history ??= []); // eski verilerde geçmiş yok
 // Eski veriyi güncel biçime getirir: 1–10 → 100'lük ölçek, tek "Defans" → stoper/sağ bek/sol bek.
-const upgrade = d => migratePositions(toScale100(d));
+const upgrade = d => syncSubs(migratePositions(toScale100(d)));
 
 // Depolama, üç yoldan biri:
 //  - bulut (cloud.js doluysa): Supabase'te ortak veri; telefon ve bilgisayar aynı veriyi görür.
@@ -1656,18 +1743,31 @@ let editing = false; // düzenleme formu açıkken başka cihazdan gelen veri fo
 function editView(id) {
   editing = true;
   const p = db.players.find(x => x.id === id)
-    ?? { name: '', positions: [], ...Object.fromEntries(ATTRS.map(k => [k, 50])) };
+    ?? { name: '', positions: [], styles: [], ...Object.fromEntries(ATTRS.map(k => [k, 50])) };
+  const cur = { ...withDefaults(p).sub }; // alt özellikler; ana puan bunlardan hesaplanır
+  const subLine = f => Object.keys(SUBS[f]).map(k => `${SUB_TR[k]} ${cur[k]}`).join(' · ');
   const slider = k => `<label class="slider"><span>${LABEL[k]}</span>
-      <input type="range" name="${k}" min="1" max="100" value="${p[k]}"><output>${p[k]}</output></label>`;
+      <input type="range" name="${k}" min="1" max="100" value="${p[k]}"><output>${p[k]}</output></label>`
+    + (SUBS[k] ? `<details class="subs"><summary id="sum-${k}">${subLine(k)}</summary>${Object.keys(SUBS[k]).map(s =>
+      `<label class="slider sub"><span>${SUB_TR[s]}</span><input type="range" data-sub="${s}" min="1" max="100" value="${cur[s]}"><output>${cur[s]}</output></label>`).join('')}</details>` : '');
+  const posLine = d => {
+    const q = withDefaults(d);
+    return Object.keys(POS_W).map(x => `<span class="${q.positions.includes(x) ? 'on' : ''}">${POS[x]} <b>${fmt(posOverall(q, x))}</b></span>`).join('');
+  };
   main.innerHTML = `<div class="head"><div><h1>${id ? esc(p.name) : 'Yeni oyuncu'}</h1>
       <p>Puanları 1–100 arası ver. Kart sen değiştirdikçe güncellenir.</p></div></div>
     <div class="editor">
-      <div class="preview" id="preview">${card(p)}</div>
+      <div><div class="preview" id="preview">${card(p)}</div>
+        <p class="pos-ratings" id="posr" title="Mevkiye göre genel puan">${posLine(p)}</p></div>
       <form id="f" class="form">
         <label class="field"><span>Ad</span><input class="input" name="name" required maxlength="16" value="${esc(p.name)}"></label>
         <div class="field"><span>Oynayabildiği pozisyonlar</span>
           <div class="pills">${Object.entries(POS).map(([k, v]) =>
             `<label class="pill"><input type="checkbox" name="positions" value="${k}" ${p.positions.includes(k) ? 'checked' : ''}><span>${v}</span></label>`).join('')}</div>
+        </div>
+        <div class="field"><span>Oyun tarzı <small>en fazla 3 rozet</small></span>
+          <div class="pills">${Object.entries(STYLES).map(([k, v]) =>
+            `<label class="pill" title="${STYLE_INFO[k]}"><input type="checkbox" name="styles" value="${k}" ${(p.styles ?? []).includes(k) ? 'checked' : ''}><span>${v}</span></label>`).join('')}</div>
         </div>
         <div class="sliders">
           <div class="group-label">Hücum</div>${ATTACK.map(slider).join('')}
@@ -1684,12 +1784,38 @@ function editView(id) {
   const form = $('f');
   const read = () => {
     const fd = new FormData(form);
-    return { name: fd.get('name').trim(), positions: fd.getAll('positions'), ...Object.fromEntries(ATTRS.map(k => [k, +fd.get(k)])) };
+    return { name: fd.get('name').trim(), positions: fd.getAll('positions'), styles: fd.getAll('styles'), sub: { ...cur },
+      ...Object.fromEntries(ATTRS.map(k => [k, SUBS[k] ? faceOf(cur, k) : +fd.get(k)])) };
+  };
+  // Ana puan değişince alt özellikleri aynı miktar kaydırır; alt özellik değişince ana puanı yeniden hesaplar.
+  const showGroup = f => {
+    form.querySelectorAll(`[data-sub]`).forEach(el => {
+      if (PARENT[el.dataset.sub] !== f) return;
+      el.value = cur[el.dataset.sub];
+      el.nextElementSibling.textContent = el.value;
+    });
+    const face = form.elements[f];
+    face.value = faceOf(cur, f);
+    face.nextElementSibling.textContent = face.value;
+    $(`sum-${f}`).textContent = subLine(f);
   };
   form.oninput = e => {
-    if (e.target.type === 'range') e.target.nextElementSibling.textContent = e.target.value;
+    const t = e.target;
+    if (t.name === 'styles' && t.checked && form.querySelectorAll('[name=styles]:checked').length > 3) {
+      t.checked = false;
+      return toast('En fazla 3 rozet seçilebilir.');
+    }
+    if (t.type === 'range') {
+      if (t.dataset.sub) { cur[t.dataset.sub] = +t.value; showGroup(PARENT[t.dataset.sub]); }
+      else if (SUBS[t.name]) {
+        const shift = +t.value - faceOf(cur, t.name);
+        for (const k in SUBS[t.name]) cur[k] = clamp100(cur[k] + shift);
+        showGroup(t.name);
+      } else t.nextElementSibling.textContent = t.value;
+    }
     const d = read();
     $('preview').innerHTML = card({ ...d, name: d.name || 'Ad' });
+    $('posr').innerHTML = posLine(d);
   };
   form.onchange = form.oninput; // pozisyon kutuları
   form.onsubmit = e => {
@@ -2133,7 +2259,9 @@ function parseBackup(text) {
   try { d = upgrade(JSON.parse(text)); } catch { return null; }
   const ok = Array.isArray(d?.players) && d.players.every(p =>
     p && typeof p.id === 'string' && typeof p.name === 'string' && Array.isArray(p.positions)
-    && ATTRS.every(k => Number.isInteger(p[k]) && p[k] >= 1 && p[k] <= 100));
+    && ATTRS.every(k => Number.isInteger(p[k]) && p[k] >= 1 && p[k] <= 100)
+    && (p.sub == null || (typeof p.sub === 'object' && Object.values(p.sub).every(v => Number.isInteger(v) && v >= 1 && v <= 100)))
+    && (p.styles == null || (Array.isArray(p.styles) && p.styles.every(k => k in STYLES))));
   if (!ok) return null;
   const ids = new Set(d.players.map(p => p.id));
   const m = d.match && typeof d.match === 'object' ? d.match : fresh().match;
