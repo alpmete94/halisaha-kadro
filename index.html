@@ -546,12 +546,15 @@ function totals(ps, mode, keeperId) {
   } else {
     keeper = ps.reduce((s, p) => s + p.goalkeeping, 0) / ps.length;
   }
+  // Kale sırayla: her an biri kalede, sahada n-1 kişi var. Saha gücü n-1 kişilik ortalamayla sayılır;
+  // yoksa karışık kalecide sırayla oynayan takıma sahada olmayan bir oyuncu fazladan yazılıyordu.
+  const share = mode === 'rotating' && ps.length > 1 ? (ps.length - 1) / ps.length : 1;
   return {
-    overall: round1(field.reduce((s, p) => s + overall(p), 0) + keeper),
-    attack: round1(sumOf(field, ATTACK)),
+    overall: round1(share * field.reduce((s, p) => s + overall(p), 0) + keeper),
+    attack: round1(share * sumOf(field, ATTACK)),
     // Kaleci savunmanın parçası (2 savunma özelliği ağırlığında). Böylece zayıf kaleli takıma daha güçlü
     // saha oyuncusu verilerek denge kurulabilir; yoksa telafi "savunma farkı" diye cezalandırılırdı.
-    defense: round1(sumOf(field, DEFENSE) + 2 * keeper),
+    defense: round1(share * sumOf(field, DEFENSE) + 2 * keeper),
     keeper: round1(keeper),
   };
 }
@@ -860,7 +863,11 @@ const ovr = p => cardRating(withDefaults(p));
 const fmt = n => String(Math.round(n));
 // Maç sonuçlarından gelen form: ▲0.3 / ▼0.2
 // Sahada gösterilen puan: oyuncunun o yerdeki mevki puanı (+ form). Kendi mevkisi dışında oynayan daha düşük görünür.
-const slotRating = (s, p) => { const q = withDefaults(p); return POS_W[s.pos] ? posOverall(q, s.pos) + (q.form ?? 0) : cardRating(q); };
+// Kalede: takım gücüne giren kalecilik puanı.
+const slotRating = (s, p) => {
+  const q = withDefaults(p);
+  return s.pos === 'GK' ? q.goalkeeping : POS_W[s.pos] ? posOverall(q, s.pos) + (q.form ?? 0) : cardRating(q);
+};
 const formTag = f => f
   ? `<span class="form-tag ${f > 0 ? 'up' : 'down'}" title="Maç sonuçlarından gelen form">${f > 0 ? '▲' : '▼'}${Math.round(Math.abs(f))}</span>`
   : '';
