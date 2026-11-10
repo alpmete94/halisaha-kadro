@@ -109,6 +109,7 @@ main { padding: 28px clamp(16px, 4vw, 40px) 64px; max-width: 1280px; margin: 0 a
 .fut-stats dd { margin: 0; font-family: var(--display); font-weight: 900; font-size: 1.15rem; min-width: 1.2em; text-align: right; }
 .fut-stats dt { font-size: .72rem; font-weight: 600; opacity: .8; }
 
+.kiralik { margin-top: 28px; } .kiralik summary { cursor: pointer; color: var(--chalk-dim); margin-bottom: 12px; }
 .empty { padding: 48px; text-align: center; border: 1px dashed var(--turf-3); border-radius: 16px; color: var(--chalk-dim); }
 
 /* ---------- Oyuncu düzenleme ---------- */
@@ -834,6 +835,8 @@ if (typeof module !== 'undefined') {
 const SHORT = { GK: 'KL', LB: 'SLB', CB: 'STP', RB: 'SĞB', DEF: 'DEF', MID: 'OS', FWD: 'FV', SUB: 'YDK' };
 const CARD_LABEL = { shot: 'ŞUT', pass: 'PAS', dribble: 'TOP', pace: 'HIZ', defense: 'SAV', physical: 'FİZ', goalkeeping: 'KAL' };
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => `&#${c.charCodeAt(0)};`);
+// "Kaleci" adlı oyuncular: adam eksik olunca parayla kiralanan kaleciler; Oyuncular listesinde görünmez, kadroya alınabilir.
+const kiralik = p => String(p.name ?? '').trim().toLocaleLowerCase('tr').startsWith('kaleci');
 // Kart puanı: genel puan; kaleciliği tercih edenlerde kalecilik puanı (+ form).
 const ovr = p => { const q = withDefaults(p); return q.positions.includes('GK') ? q.goalkeeping + (q.form ?? 0) : overall(q); };
 // Puanlar 100 üzerinden, FIFA gibi tam sayı gösterilir.
@@ -1015,7 +1018,7 @@ function staticSections(d) {
   const byId = new Map(d.players.map(p => [p.id, p]));
   const m = d.match ?? {}, l = m.lineup;
   const when = d.savedAt ? new Date(d.savedAt).toLocaleString('tr-TR', { day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' }) : '';
-  const ps = [...d.players].sort((a, b) => ovr(b) - ovr(a));
+  const ps = d.players.filter(p => !kiralik(p)).sort((a, b) => ovr(b) - ovr(a));
   const hist = Array.isArray(d.history) ? d.history : [];
   const kadro = l
     ? `${scoreboard(l, byId).html}
@@ -1309,7 +1312,7 @@ function olayYoneticiHtml(v) {
     ${v.sutlar?.length ? `<h3 class="sub-h">Şut adayları</h3><ul class="olay-liste">${v.sutlar.map(s => `<li><b>${esc(s.t)}</b> ${esc(s.kim)} <span class="dim">${takim[s.taraf] ?? ''}${s.hiz ? `, ${s.hiz} km/s` : ''}</span></li>`).join('')}</ul>` : ''}`;
 }
 
-if (typeof module !== 'undefined') module.exports = { olayYoneticiHtml, card, pitchSvg, scoreboard, roster, standingsTable, historyList, staticSections, staticPage, analysisHtml, analysisTeamsHtml, analysisPlayerHtml, goalsHtml, videoCompareHtml, formationsHtml, formationsPng, motm, motmHtml, seasonVideoHtml, onayHtml, onaySayilari };
+if (typeof module !== 'undefined') module.exports = { kiralik, olayYoneticiHtml, card, pitchSvg, scoreboard, roster, standingsTable, historyList, staticSections, staticPage, analysisHtml, analysisTeamsHtml, analysisPlayerHtml, goalsHtml, videoCompareHtml, formationsHtml, formationsPng, motm, motmHtml, seasonVideoHtml, onayHtml, onaySayilari };
 </script>
   <script>/* cloud.js */
 // Supabase ortak veri bağlantısı. URL ve anahtar boşsa uygulama bu cihazda (localStorage) çalışır.
@@ -1707,13 +1710,15 @@ function ask(message, okLabel, danger = false) {
 // ---------------- Oyuncular ----------------
 function playersView() {
   editing = false;
-  const ps = [...db.players].sort((a, b) => ovr(b) - ovr(a));
+  const ps = db.players.filter(p => !kiralik(p)).sort((a, b) => ovr(b) - ovr(a));
+  const kr = db.players.filter(kiralik);
   main.innerHTML = `<div class="head">
       <div><h1>Oyuncular</h1><p>${ps.length} oyuncu, genel puana göre.${READONLY ? '' : ' Düzenlemek için karta tıkla.'}</p></div>
       ${READONLY ? '' : '<button class="btn" id="add">Oyuncu ekle</button>'}
     </div>
     ${ps.length ? `<div class="cards">${ps.map(p => card(p, READONLY ? 'disabled' : `data-edit="${p.id}"`)).join('')}</div>`
-      : '<div class="empty">Henüz oyuncu yok. İlk oyuncunu ekleyerek başla.</div>'}`;
+      : '<div class="empty">Henüz oyuncu yok. İlk oyuncunu ekleyerek başla.</div>'}
+    ${!READONLY && kr.length ? `<details class="kiralik"><summary>Kiralık kaleciler (${kr.length})</summary><div class="cards">${kr.map(p => card(p, `data-edit="${p.id}"`)).join('')}</div></details>` : ''}`;
   if (READONLY) return;
   $('add').onclick = () => editView();
   main.querySelectorAll('[data-edit]').forEach(el => { el.onclick = () => editView(el.dataset.edit); });
@@ -1789,7 +1794,7 @@ function editView(id) {
       } else t.nextElementSibling.textContent = t.value;
     }
     const d = read();
-    $('preview').innerHTML = card({ ...d, name: d.name || 'Ad' });
+    $('preview').innerHTML = card({ ...d, name: d.name || 'Ad' });
   };
   form.onchange = form.oninput; // pozisyon kutuları
   form.onsubmit = e => {
